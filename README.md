@@ -1,5 +1,10 @@
 # ScanPay — Code Security Scanner with x402 v2 Micropayments
 
+![npm version](https://img.shields.io/npm/v/scanpay-cli.svg)
+![npm downloads](https://img.shields.io/npm/dm/scanpay-cli.svg)
+![GitHub](https://img.shields.io/github/stars/Misterio070/scanpay.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+
 > Deterministic AST-based security scanning for Python and JavaScript/TypeScript.
 > No code execution. No AI inference. Just fast, reliable vulnerability detection.
 > Pay per scan with Solana micropayments — $0.10/scan.
