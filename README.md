@@ -62,6 +62,24 @@ python main.py
 4. Server verifies payment on-chain, runs scan, returns results
 
 **Merchant wallet:** `JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4`
+
+## 🤖 For AI Agents (MCP Server)
+
+ScanPay includes an MCP server for AI agents to scan code before execution:
+
+```json
+{
+  "mcpServers": {
+    "scanpay": {
+      "command": "npx",
+      "args": ["-y", "scanpay-cli", "scanpay-mcp"],
+      "env": { "SCANPAY_URL": "https://repository-nil-camcorder-divx.trycloudflare.com" }
+    }
+  }
+}
+```
+
+Agents call `scan_code` to check code for vulnerabilities before running it.
 **Network:** Solana testnet (mainnet coming soon)
 
 ## 📋 Configuration
