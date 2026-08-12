@@ -1,7 +1,8 @@
 {
   "name": "scanpay-mcp-server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MCP server for AI agents — scan code for security vulnerabilities before execution. x402 v2 micropayments on Solana.",
+  "mcpName": "io.github.Misterio070/scanpay",
   "bin": {
     "scanpay-mcp": "./index.js"
   },

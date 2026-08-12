@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Misterio070/scanpay",
+  "description": "Code security scanner for AI agents. 45+ vulnerability patterns, AST analysis, Solana micropayments.",
+  "repository": {
+    "url": "https://github.com/Misterio070/scanpay",
+    "source": "github",
+    "subfolder": "npm/scanpay-mcp"
+  },
+  "version": "0.2.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "scanpay-mcp-server",
+      "version": "0.2.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "description": "ScanPay API URL (default: https://repository-nil-camcorder-divx.trycloudflare.com)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false,
+          "name": "SCANPAY_URL"
+        }
+      ]
+    }
+  ]
+}
