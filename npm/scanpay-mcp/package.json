@@ -1,0 +1,33 @@
+{
+  "name": "scanpay-mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server for AI agents — scan code for security vulnerabilities before execution. x402 v2 micropayments on Solana.",
+  "bin": {
+    "scanpay-mcp": "./index.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "security",
+    "scanner",
+    "code-scanner",
+    "ai-agents",
+    "x402",
+    "solana",
+    "micropayments",
+    "static-analysis",
+    "python",
+    "javascript",
+    "vulnerability"
+  ],
+  "author": "alextaghiashvili",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Misterio070/scanpay"
+  },
+  "homepage": "https://github.com/Misterio070/scanpay#readme",
+  "engines": {
+    "node": ">=14"
+  }
+}

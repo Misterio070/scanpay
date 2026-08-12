@@ -1,0 +1,46 @@
+{
+  "name": "scanpay",
+  "description": "Code security scanner with x402 v2 micropayments. Scan Python/JS/TS for 45+ vulnerability patterns using deterministic AST analysis. No AI, no code execution — just fast, reliable pattern matching.",
+  "version": "0.2.0",
+  "url": "https://repository-nil-camcorder-divx.trycloudflare.com",
+  "payment": {
+    "scheme": "solana",
+    "network": "solana-devnet",
+    "amount": 700000,
+    "asset": "SOL",
+    "recipient": "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4",
+    "amount_display": "0.0007 SOL (~$0.10)",
+    "x402_version": 2
+  },
+  "products": [
+    {
+      "id": "python-scan",
+      "name": "Python Security Scan",
+      "price_usd": 0.10,
+      "description": "Deterministic AST analysis of Python code. 30+ vulnerability patterns."
+    },
+    {
+      "id": "js-scan",
+      "name": "JavaScript/TypeScript Security Scan",
+      "price_usd": 0.10,
+      "description": "Tree-sitter AST analysis of JS/TS/TSX code. 23+ vulnerability patterns."
+    }
+  ],
+  "mcp": {
+    "command": "npx",
+    "args": ["-y", "scanpay-cli", "scanpay-mcp"],
+    "env": {
+      "SCANPAY_URL": "https://repository-nil-camcorder-divx.trycloudflare.com"
+    }
+  },
+  "endpoints": {
+    "health": "/api/v1/health",
+    "products": "/api/v1/products",
+    "scan": "/api/v1/scan"
+  },
+  "keywords": ["security", "scanner", "code-scanner", "vulnerability", "x402", "solana", "micropayments", "ai-agents", "static-analysis"],
+  "github": "https://github.com/Misterio070/scanpay",
+  "npm": "https://www.npmjs.com/package/scanpay-cli",
+  "author": "alextaghiashvili",
+  "license": "MIT"
+}
