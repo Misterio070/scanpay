@@ -1,0 +1,42 @@
+{
+  "name": "scanpay-cli",
+  "version": "0.1.0",
+  "description": "Code security scanner with x402 v2 micropayments — scan Python/JS/TS for vulnerabilities before execution",
+  "main": "index.js",
+  "bin": {
+    "scanpay": "./bin/cli.js"
+  },
+  "scripts": {
+    "test": "node test/test.js"
+  },
+  "keywords": [
+    "security",
+    "scanner",
+    "code-scanner",
+    "vulnerability",
+    "x402",
+    "solana",
+    "micropayments",
+    "ai-agents",
+    "static-analysis",
+    "python",
+    "javascript",
+    "typescript"
+  ],
+  "author": "alextaghiashvili",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Misterio070/scanpay"
+  },
+  "homepage": "https://github.com/Misterio070/scanpay",
+  "bugs": {
+    "url": "https://github.com/Misterio070/scanpay/issues"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+  "dependencies": {
+    "node-fetch": "^2.7.0"
+  }
+}
