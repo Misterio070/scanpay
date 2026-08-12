@@ -1,10 +1,11 @@
 {
   "name": "scanpay-cli",
-  "version": "0.1.0",
-  "description": "Code security scanner with x402 v2 micropayments — scan Python/JS/TS for vulnerabilities before execution",
+  "version": "0.2.0",
+  "description": "Code security scanner with x402 v2 micropayments — scan Python/JS/TS for vulnerabilities before execution. Includes MCP server for AI agents.",
   "main": "index.js",
   "bin": {
-    "scanpay": "./bin/cli.js"
+    "scanpay": "./bin/cli.js",
+    "scanpay-mcp": "./bin/mcp-server.js"
   },
   "scripts": {
     "test": "node test/test.js"
