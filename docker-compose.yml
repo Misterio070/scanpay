@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+  scanpay:
+    build: .
+    container_name: scanpay
+    ports:
+      - "${SCANPAY_PORT:-8484}:8484"
+    environment:
+      - SCANPAY_PAYMENT_MODE=${SCANPAY_PAYMENT_MODE:-disabled}
+      - SCANPAY_MERCHANT_WALLET=${SCANPAY_MERCHANT_WALLET:-}
+      - SCANPAY_RPC_URL=${SCANPAY_RPC_URL:-https://api.devnet.solana.com}
+      - SCANPAY_PRICE_LAMPORTS=${SCANPAY_PRICE_LAMPORTS:-10000000}
+    volumes:
+      - scanpay-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8484/api/v1/health')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  scanpay-data:

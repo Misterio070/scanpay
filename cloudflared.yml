@@ -1,0 +1,23 @@
+# Cloudflare Tunnel configuration for ScanPay
+# This is a CONFIGURATION FILE for a named/stable tunnel, not a Quick Tunnel.
+#
+# Setup steps:
+# 1. Install cloudflared: winget install --id Cloudflare.cloudflared
+# 2. Login: cloudflared tunnel login
+# 3. Create a named tunnel: cloudflared tunnel create scanpay
+# 4. Copy the tunnel UUID from the output
+# 5. Create a DNS route: cloudflared tunnel route dns scanpay scanpay.yourdomain.com
+# 6. Update the tunnel UUID below and the hostname
+# 7. Run: cloudflared tunnel run --config cloudflared.yml scanpay
+
+tunnel: <your-tunnel-uuid>
+credentials-file: C:\Users\TMGU\.cloudflared\<your-tunnel-uuid>.json
+
+ingress:
+  - hostname: scanpay.yourdomain.com
+    service: http://127.0.0.1:8484
+    originRequest:
+      noTLSVerify: true
+      connectTimeout: 10s
+      noHappyEyeballs: true
+  - service: http_status:404

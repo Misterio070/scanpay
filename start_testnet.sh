@@ -1,0 +1,10 @@
+#!/bin/bash
+export SCANPAY_PAYMENT_MODE=testnet
+export SCANPAY_MERCHANT_WALLET=JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4
+export SCANPAY_RPC_URL=https://api.devnet.solana.com
+export SCANPAY_PRICE_LAMPORTS=10000000
+export SCANPAY_CORS_ORIGINS=*
+export SCANPAY_FREE_TRIAL_ENABLED=true
+export SCANPAY_FREE_TRIAL_LIMIT=5
+cd "E:/ALEX_AGENT_OS/13_APPLICATIONS/scanpay"
+exec python main.py
