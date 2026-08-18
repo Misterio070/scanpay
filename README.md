@@ -30,15 +30,15 @@ Built for **AI agents** that generate code: scan before execution, block dangero
 
 ScanPay is deployed and running:
 
-- **Public API:** `https://removed-previously-proteins-navy.trycloudflare.com`
-- **Products:** `https://removed-previously-proteins-navy.trycloudflare.com/api/v1/products`
+- **Public API:** `https://stones-attract-machines-coordination.trycloudflare.com`
+- **Products:** `https://stones-attract-machines-coordination.trycloudflare.com/api/v1/products`
 - **Payment:** x402 v2 on Solana testnet (0.0007 SOL ≈ $0.10 per scan)
 - **Wallet:** `JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4`
 
 ### Try it
 
 ```bash
-curl -X POST https://removed-previously-proteins-navy.trycloudflare.com/api/v1/scan \
+curl -X POST https://stones-attract-machines-coordination.trycloudflare.com/api/v1/scan \
   -H "Content-Type: application/json" \
   -d '{"language":"python","source_code":"import os; os.system(\"rm -rf /\")"}'
 ```
