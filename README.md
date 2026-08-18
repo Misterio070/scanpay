@@ -30,15 +30,15 @@ Built for **AI agents** that generate code: scan before execution, block dangero
 
 ScanPay is deployed and running:
 
-- **Public API:** `https://stones-attract-machines-coordination.trycloudflare.com`
-- **Products:** `https://stones-attract-machines-coordination.trycloudflare.com/api/v1/products`
-- **Payment:** x402 v2 on Solana testnet (0.0007 SOL ≈ $0.10 per scan)
+- **Public API:** `https://theoretical-config-hobby-kruger.trycloudflare.com`
+- **Products:** `https://theoretical-config-hobby-kruger.trycloudflare.com/api/v1/products`
+- **Payment:** x402 v2 on Solana mainnet (0.0007 SOL ≈ $0.10 per scan)
 - **Wallet:** `JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4`
 
 ### Try it
 
 ```bash
-curl -X POST https://stones-attract-machines-coordination.trycloudflare.com/api/v1/scan \
+curl -X POST https://theoretical-config-hobby-kruger.trycloudflare.com/api/v1/scan \
   -H "Content-Type: application/json" \
   -d '{"language":"python","source_code":"import os; os.system(\"rm -rf /\")"}'
 ```
@@ -47,7 +47,7 @@ Returns `402 Payment Required` with Solana payment details. Send payment and ret
 
 ## 🚀 Quick Start
 
-### Using the Live API (testnet)
+### Using the Live API (mainnet)
 
 ```bash
 # Health check
@@ -99,7 +99,7 @@ ScanPay includes an MCP server for AI agents to scan code before execution:
 ```
 
 Agents call `scan_code` to check code for vulnerabilities before running it.
-**Network:** Solana testnet (mainnet coming soon)
+**Network:** Solana mainnet (mainnet coming soon)
 
 ## 📋 Configuration
 
@@ -109,7 +109,7 @@ cp .env.example .env
 
 | Env Var | Default | Description |
 |---------|---------|-------------|
-| `SCANPAY_PAYMENT_MODE` | `disabled` | `disabled`, `testnet`, or `mainnet` |
+| `SCANPAY_PAYMENT_MODE` | `disabled` | `disabled`, `mainnet`, or `mainnet` |
 | `SCANPAY_MERCHANT_WALLET` | — | Solana wallet address |
 | `SCANPAY_PRICE_LAMPORTS` | `700000` | Price in lamports (0.0007 SOL) |
 | `SCANPAY_RPC_URL` | `https://api.devnet.solana.com` | Solana RPC endpoint |
@@ -145,7 +145,7 @@ Returns service status and configuration.
 Returns available scan products and pricing.
 
 ### `POST /api/v1/scan`
-Scans source code for vulnerabilities. Requires payment in testnet/mainnet mode.
+Scans source code for vulnerabilities. Requires payment in mainnet/mainnet mode.
 
 **Request:**
 ```json
