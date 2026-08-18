@@ -26,6 +26,25 @@ Built for **AI agents** that generate code: scan before execution, block dangero
 - **SARIF output** — industry-standard vulnerability report format
 - **Batch scanning** — scan multiple files in one request
 
+## 🌐 Live Demo
+
+ScanPay is deployed and running:
+
+- **Public API:** `https://removed-previously-proteins-navy.trycloudflare.com`
+- **Products:** `https://removed-previously-proteins-navy.trycloudflare.com/api/v1/products`
+- **Payment:** x402 v2 on Solana testnet (0.0007 SOL ≈ $0.10 per scan)
+- **Wallet:** `JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4`
+
+### Try it
+
+```bash
+curl -X POST https://removed-previously-proteins-navy.trycloudflare.com/api/v1/scan \
+  -H "Content-Type: application/json" \
+  -d '{"language":"python","source_code":"import os; os.system(\"rm -rf /\")"}'
+```
+
+Returns `402 Payment Required` with Solana payment details. Send payment and retry with `X-PAYMENT` header to get the scan result.
+
 ## 🚀 Quick Start
 
 ### Using the Live API (testnet)
