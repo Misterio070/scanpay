@@ -1,5 +1,23 @@
 # ScanPay — Code Security Scanner with x402 v2 Micropayments
 
+
+## 🚀 Try ScanPay Live (Solana Mainnet)
+
+Pay 0.0007 SOL (~$0.10) per scan. No account. No API key.
+
+- **Live API:** https://theoretical-config-hobby-kruger.trycloudflare.com
+- **Landing page:** https://misterio070.github.io/scanpay-landing/
+- **AgentBridge:** https://invest-ftp-cast-surround.trycloudflare.com
+- **MCP Server:** `npx scanpay-mcp-server`
+- **CLI:** `npx scanpay-cli scan --language python --file ./code.py`
+- **llms.txt:** https://github.com/Misterio070/scanpay/blob/main/llms.txt
+
+## 💰 Pricing
+
+- Python / JavaScript / TypeScript scan: **0.0007 SOL**
+- AgentBridge job escrow commission: **10%**
+- No subscriptions, no free trial abuse.
+
 ![npm version](https://img.shields.io/npm/v/scanpay-cli.svg)
 ![npm downloads](https://img.shields.io/npm/dm/scanpay-cli.svg)
 ![GitHub](https://img.shields.io/github/stars/Misterio070/scanpay.svg)
