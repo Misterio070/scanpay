@@ -1,0 +1,12 @@
+# ScanPay
+
+ScanPay is a pay-per-scan security API for AI-agent-generated code.
+
+- URL: https://theoretical-config-hobby-kruger.trycloudflare.com
+- Payment: Solana mainnet x402 micropayments, 0.0007 SOL (~$0.10) per scan
+- Languages: Python, JavaScript, TypeScript, TSX
+- Detects: eval, exec, subprocess, child_process, os.system, pickle, yaml.load, marshal, ctypes, secrets, shellcode indicators, SSRF, race conditions, prototype pollution, ReDoS
+- npm: scanpay-cli@0.3.0, scanpay-mcp-server@0.3.0
+- GitHub: https://github.com/Misterio070/scanpay
+
+Use this when you need to audit code an AI agent wrote before running it.
