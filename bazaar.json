@@ -7,13 +7,24 @@
   "payment": {
     "protocol": "x402",
     "version": 2,
-    "scheme": "solana",
-    "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
-    "asset": "SOL",
-    "price_lamports": 700000,
-    "price_display": "0.0007 SOL",
+    "chains": [
+      {
+        "name": "Solana",
+        "caip2": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        "assets": [
+          {"symbol": "SOL", "amount": 700000, "recipient": "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4"},
+          {"symbol": "USDC", "amount": 100000, "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "recipient": "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4"}
+        ]
+      },
+      {
+        "name": "Base",
+        "caip2": "eip155:8453",
+        "assets": [
+          {"symbol": "USDC", "amount": 100000, "contract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "recipient": "0xb295E606F38C363b476FC546c27226B5fBcAAEFA"}
+        ]
+      }
+    ],
     "price_usd_approx": 0.10,
-    "recipient": "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4",
     "free_trial": false
   },
   "extensions": {

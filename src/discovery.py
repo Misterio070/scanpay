@@ -100,23 +100,35 @@ def get_well_known_x402(merchant: str = MERCHANT_WALLET, evm_merchant: str = MER
     }
 
 
-def get_bazaar_manifest(merchant: str = MERCHANT_WALLET) -> dict[str, Any]:
+def get_bazaar_manifest(merchant: str = MERCHANT_WALLET, evm_merchant: str = MERCHANT_EVM_WALLET) -> dict[str, Any]:
     """Returns /bazaar.json metadata for Coinbase CDP and Onyx Bazaar aggregators."""
     return {
         "name": "ScanPay",
-        "description": "Deterministic AST code security scanner with x402 Solana micropayments and instant auto-remediation for AI agents.",
+        "description": "Deterministic AST code security scanner with multi-chain x402 micropayments (Solana + Base) and instant auto-remediation for AI agents.",
         "version": "1.1.0",
         "engine_version": "1.1.0",
         "homepage": "https://github.com/Misterio070/scanpay",
         "payment": {
             "protocol": "x402",
             "version": 2,
-            "scheme": "solana",
-            "network": SOLANA_CAIP2,
-            "asset": "SOL",
-            "price_lamports": SINGLE_SCAN_LAMPORTS,
-            "price_display": "0.0007 SOL (~$0.10)",
-            "recipient": merchant,
+            "chains": [
+                {
+                    "name": "Solana",
+                    "caip2": SOLANA_CAIP2,
+                    "assets": [
+                        {"symbol": "SOL", "amount": SINGLE_SCAN_LAMPORTS, "recipient": merchant},
+                        {"symbol": "USDC", "amount": 100000, "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "recipient": merchant},
+                    ],
+                },
+                {
+                    "name": "Base",
+                    "caip2": BASE_CAIP2,
+                    "assets": [
+                        {"symbol": "USDC", "amount": 100000, "contract": BASE_USDC_CONTRACT, "recipient": evm_merchant},
+                    ],
+                },
+            ],
+            "price_usd_approx": 0.10,
             "free_trial": False,
         },
         "extensions": {
@@ -124,7 +136,7 @@ def get_bazaar_manifest(merchant: str = MERCHANT_WALLET) -> dict[str, Any]:
                 "discoverable": True,
                 "category": "security",
                 "service_type": "security-oracle",
-                "tags": ["security", "ast-scanner", "code-auditor", "solana", "x402", "ai-agents"],
+                "tags": ["security", "ast-scanner", "code-auditor", "solana", "base", "x402", "ai-agents"],
             }
         },
         "products": [
