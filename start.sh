@@ -27,15 +27,26 @@ if [ -f "$PID_FILE" ]; then
     fi
 fi
 
+# Load .env if present
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "$SCRIPT_DIR/.env"
+    set +a
+fi
+
 # Default to disabled payment mode if not set
 export SCANPAY_PAYMENT_MODE="${SCANPAY_PAYMENT_MODE:-disabled}"
-export SCANPAY_PORT="$PORT"
+export SCANPAY_PORT="${1:-${SCANPAY_PORT:-8484}}"
 
 echo "Starting ScanPay on port $PORT (payment_mode=$SCANPAY_PAYMENT_MODE)"
 echo "Log: $LOG_FILE"
 
-# Start uvicorn in background
-python -m uvicorn main:app --host 0.0.0.0 --port "$PORT" >> "$LOG_FILE" 2>&1 &
+# Detect python executable
+PYTHON_BIN="$(command -v python3 || command -v python || echo "python3")"
+
+# Start uvicorn in background with nohup
+nohup "$PYTHON_BIN" -m uvicorn main:app --host 0.0.0.0 --port "$PORT" >> "$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 echo "$SERVER_PID" > "$PID_FILE"
 

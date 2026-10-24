@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: scanpay-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: SCANPAY_PAYMENT_MODE
+        value: mainnet
+      - key: SCANPAY_MERCHANT_WALLET
+        value: JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4
+      - key: SCANPAY_PRICE_LAMPORTS
+        value: "700000"
+      - key: SCANPAY_RPC_URL
+        value: https://api.mainnet-beta.solana.com
+      - key: SCANPAY_CORS_ORIGINS
+        value: "*"
+      - key: SCANPAY_FREE_TRIAL_ENABLED
+        value: "false"

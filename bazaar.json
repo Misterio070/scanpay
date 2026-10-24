@@ -7,12 +7,13 @@
     "protocol": "x402",
     "version": 2,
     "scheme": "solana",
-    "network": "solana-testnet",
+    "network": "solana-mainnet",
     "asset": "SOL",
-    "price_lamports": 10000000,
-    "price_display": "0.01 SOL",
-    "price_usd_approx": 1.5,
-    "mode": "testnet",
+    "price_lamports": 700000,
+    "price_display": "0.0007 SOL",
+    "price_usd_approx": 0.10,
+    "mode": "mainnet",
+    "recipient": "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4",
     "free_trial": false
   },
   "products": [

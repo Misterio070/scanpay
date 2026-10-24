@@ -5,7 +5,7 @@
   "url": "https://repository-nil-camcorder-divx.trycloudflare.com",
   "payment": {
     "scheme": "solana",
-    "network": "solana-devnet",
+    "network": "solana-mainnet",
     "amount": 700000,
     "asset": "SOL",
     "recipient": "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4",

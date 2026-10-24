@@ -7,9 +7,14 @@
  */
 
 const http = require('http');
+const https = require('https');
 const readline = require('readline');
 
 const DEFAULT_URL = process.env.SCANPAY_URL || 'http://localhost:8484';
+
+function getHttpClient(targetUrl) {
+  return targetUrl.protocol === 'https:' ? https : http;
+}
 
 // MCP protocol implementation
 class ScanPayMCP {
@@ -79,28 +84,33 @@ class ScanPayMCP {
     return new Promise((resolve) => {
       const data = JSON.stringify({ source_code: sourceCode, language });
       const url = new URL('/api/v1/scan', DEFAULT_URL);
+      const client = getHttpClient(url);
       
       const options = {
         hostname: url.hostname,
-        port: url.port || 80,
+        port: url.port || (url.protocol === 'https:' ? 443 : 80),
         path: url.pathname,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }
       };
 
-      const req = http.request(options, (res) => {
+      const req = client.request(options, (res) => {
         let body = '';
         res.on('data', (chunk) => body += chunk);
         res.on('end', () => {
           if (res.statusCode === 402) {
-            const payment = JSON.parse(body);
-            resolve({
-              content: [{ 
-                type: 'text', 
-                text: `Payment required: ${payment.paymentRequirements.amount_display} to ${payment.paymentRequirements.recipient}. Send payment and retry with X-PAYMENT header.` 
-              }],
-              isError: false
-            });
+            try {
+              const payment = JSON.parse(body);
+              resolve({
+                content: [{ 
+                  type: 'text', 
+                  text: `Payment required: ${payment.paymentRequirements.amount_display} to ${payment.paymentRequirements.recipient}. Send payment and retry with X-PAYMENT header.` 
+                }],
+                isError: false
+              });
+            } catch {
+              resolve({ content: [{ type: 'text', text: body }], isError: true });
+            }
           } else {
             resolve({ content: [{ type: 'text', text: body }], isError: false });
           }
@@ -114,7 +124,9 @@ class ScanPayMCP {
 
   async listProducts() {
     return new Promise((resolve) => {
-      http.get(`${DEFAULT_URL}/api/v1/products`, (res) => {
+      const url = new URL('/api/v1/products', DEFAULT_URL);
+      const client = getHttpClient(url);
+      client.get(url.toString(), (res) => {
         let body = '';
         res.on('data', (chunk) => body += chunk);
         res.on('end', () => resolve({ content: [{ type: 'text', text: body }], isError: false }));
@@ -124,7 +136,9 @@ class ScanPayMCP {
 
   async healthCheck() {
     return new Promise((resolve) => {
-      http.get(`${DEFAULT_URL}/api/v1/health`, (res) => {
+      const url = new URL('/api/v1/health', DEFAULT_URL);
+      const client = getHttpClient(url);
+      client.get(url.toString(), (res) => {
         let body = '';
         res.on('data', (chunk) => body += chunk);
         res.on('end', () => resolve({ content: [{ type: 'text', text: body }], isError: false }));
