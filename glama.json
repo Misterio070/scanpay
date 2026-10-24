@@ -1,0 +1,14 @@
+{
+  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "name": "scanpay-mcp",
+  "version": "0.3.1",
+  "description": "Deterministic code security scanner with x402 v2 micropayments on Solana. Scans Python and JavaScript/TypeScript source for 45+ vulnerability patterns using AST analysis before execution.",
+  "maintainers": [
+    "Misterio070"
+  ],
+  "categories": [
+    "security",
+    "developer-tools",
+    "web3"
+  ]
+}
