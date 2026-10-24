@@ -87,7 +87,7 @@ logger = logging.getLogger("scanpay")
 # --- Config ------------------------------------------------------------------
 PaymentMode = Literal["disabled", "testnet", "mainnet"]
 
-PAYMENT_MODE: PaymentMode = os.getenv("SCANPAY_PAYMENT_MODE", "disabled")
+PAYMENT_MODE: PaymentMode = os.getenv("SCANPAY_PAYMENT_MODE", "mainnet")
 
 _RPC_ENDPOINTS = {
     "disabled": "https://api.devnet.solana.com",
