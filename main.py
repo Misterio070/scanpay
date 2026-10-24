@@ -114,7 +114,7 @@ PAYMENT_PROXY_URL = os.getenv("SCANPAY_PAYMENT_PROXY_URL", "")
 DB_PATH = os.getenv("SCANPAY_DB_PATH",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "scanpay.db"))
 
-ENGINE_VERSION = "1.1.0"
+ENGINE_VERSION = "1.2.0"
 
 
 # --- Database ----------------------------------------------------------------
