@@ -95,6 +95,10 @@ _RPC_ENDPOINTS = {
 SOLANA_RPC = os.getenv("SCANPAY_RPC_URL", os.getenv("SOLANA_RPC", _RPC_ENDPOINTS[PAYMENT_MODE]))
 
 MERCHANT_WALLET = (os.getenv("SCANPAY_MERCHANT_WALLET") or "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4").strip()
+MERCHANT_EVM_WALLET = (os.getenv("SCANPAY_MERCHANT_EVM_WALLET") or "0xb295E606F38C363b476FC546c27226B5fBcAAEFA").strip()
+BASE_RPC = os.getenv("SCANPAY_BASE_RPC", "https://mainnet.base.org")
+BASE_USDC_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+TRANSFER_EVENT_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
 PRICE_LAMPORTS = int(os.getenv("SCANPAY_PRICE_LAMPORTS") or "700000")
 PRICE_SOL = PRICE_LAMPORTS / 1_000_000_000
@@ -236,6 +240,15 @@ def build_x402_requirements() -> dict:
                 "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
                 "recipient": MERCHANT_WALLET or "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4",
             },
+            {
+                "scheme": "evm",
+                "network": "eip155:8453",
+                "asset": "USDC",
+                "amount": 100000,
+                "amount_display": "0.10 USDC",
+                "tokenContract": BASE_USDC_CONTRACT,
+                "recipient": MERCHANT_EVM_WALLET,
+            },
         ],
     }
     if PAYMENT_PROXY_URL:
@@ -321,6 +334,50 @@ async def verify_solana_tx(tx_sig: str, min_lamports: int = PRICE_LAMPORTS) -> d
                             "slot": tx.get("slot"),
                         }
         raise ValueError(f"No valid transfer to {MERCHANT_WALLET} of >= {min_lamports} lamports or >= 0.10 USDC")
+
+
+async def verify_evm_tx(tx_hash: str, min_usdc: int = 100000) -> dict:
+    """Verify an EVM transaction on Base mainnet (USDC or native ETH)."""
+    if PAYMENT_MODE == "disabled":
+        raise ValueError("Payment verification disabled (PAYMENT_MODE=disabled)")
+
+    recipient_padded = "0x" + MERCHANT_EVM_WALLET.lower().replace("0x", "").rjust(64, "0")
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(BASE_RPC, json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getTransactionReceipt",
+            "params": [tx_hash]
+        })
+        data = resp.json()
+        receipt = data.get("result")
+        if not receipt:
+            raise ValueError(f"Transaction receipt not found on Base ({tx_hash})")
+
+        if receipt.get("status") != "0x1":
+            raise ValueError("Transaction failed on Base")
+
+        # Parse event logs for ERC-20 Transfer to merchant EVM wallet
+        for log in receipt.get("logs", []):
+            topics = log.get("topics", [])
+            if len(topics) >= 3 and topics[0].lower() == TRANSFER_EVENT_TOPIC:
+                to_addr = topics[2].lower()
+                if to_addr == recipient_padded:
+                    value_hex = log.get("data", "0x0")
+                    value = int(value_hex, 16)
+                    if value >= min_usdc:
+                        payer_addr = "0x" + topics[1][-40:]
+                        return {
+                            "valid": True,
+                            "payer": payer_addr,
+                            "amount_lamports": value,
+                            "asset": "USDC",
+                            "network": "base",
+                            "slot": int(receipt.get("blockNumber", "0x0"), 16),
+                        }
+
+        raise ValueError(f"No valid transfer to {MERCHANT_EVM_WALLET} of >= 0.10 USDC found in receipt")
 
 
 # --- Models ------------------------------------------------------------------
@@ -485,7 +542,10 @@ async def scan_code(
 
         if not check_payment(payment_proof):
             try:
-                result = await verify_solana_tx(payment_proof)
+                if payment_proof.startswith("0x") and len(payment_proof) == 66:
+                    result = await verify_evm_tx(payment_proof)
+                else:
+                    result = await verify_solana_tx(payment_proof)
                 store_payment(payment_proof, result["payer"],
                               result["amount_lamports"], result["network"])
             except ValueError as e:

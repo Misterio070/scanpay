@@ -165,6 +165,26 @@ class TestUSDCPayment:
             assert data["charged"] is True
             assert data["execution_gate"]["verdict"] == "PASS"
 
+    def test_base_evm_usdc_payment_accepted(self, testnet_client):
+        fake_evm_tx = "0x" + "b" * 64
+        mock_evm_result = {
+            "valid": True,
+            "payer": "0x1234567890123456789012345678901234567890",
+            "amount_lamports": 100000,
+            "asset": "USDC",
+            "network": "testnet",
+            "slot": 98765,
+        }
+        with patch("main.verify_evm_tx", new_callable=AsyncMock, return_value=mock_evm_result):
+            r = testnet_client.post("/api/v1/scan", json={
+                "source_code": "x = 1",
+                "language": "python",
+            }, headers={"X-PAYMENT": fake_evm_tx})
+            assert r.status_code == 200
+            data = r.json()
+            assert data["charged"] is True
+            assert data["execution_gate"]["verdict"] == "PASS"
+
 
 class TestPaymentRecipientBinding:
     """Payments must go to the configured merchant wallet."""
