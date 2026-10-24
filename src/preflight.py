@@ -32,6 +32,16 @@ KNOWN_DRAINER_SINKS = {
     "0x6666666666666666666666666666666666666666": "Blacklisted MEV Exploiter",
 }
 
+# OFAC Sanctioned / Lazarus / Tornado Cash Entities (AML Compliance Screening)
+OFAC_SANCTIONED_ADDRESSES = {
+    "0xd90e2f925da726b50c4ed8d0fb90ad053324f31b": "Tornado.Cash: Router",
+    "0xa160cdab225685da1d56aa342ad8841c3b53f291": "Tornado.Cash: 100 ETH Pool",
+    "0x47ce0c6ed5b0ce3d3a51fdb1c52dc66a7c3c2936": "Tornado.Cash: 10 ETH Pool",
+    "0x12d66f87a04a9e220743712ce6d9bb1b5616b8fc": "Tornado.Cash: 1 ETH Pool",
+    "0x22aaa7276286ceeb007e447920454350ce49646b": "Tornado.Cash: 0.1 ETH Pool",
+    "0x098b716b8aaf21512996dc57eb0615e2383e2f96": "Lazarus Group (Ronin Bridge Exploiter)",
+}
+
 # Standard EVM Selectors
 SELECTOR_APPROVE = "0x095ea7b3"
 SELECTOR_TRANSFER = "0xa9059cbb"
@@ -114,6 +124,16 @@ def analyze_evm_transaction(tx_data: Dict[str, Any]) -> Tuple[List[PreflightFind
             remediation_advice="Immediately abort this transaction. Do not interact with this destination.",
         ))
 
+    # Check 1a: OFAC Sanctioned / Blacklisted Entity (AML Compliance)
+    if to_addr in OFAC_SANCTIONED_ADDRESSES:
+        findings.append(PreflightFinding(
+            rule_id="PRE-AML-001",
+            severity="CRITICAL",
+            title="Interaction with OFAC Sanctioned / Blacklisted Entity",
+            description=f"Destination address {to_addr} is flagged as an OFAC SDN entity ({OFAC_SANCTIONED_ADDRESSES[to_addr]}). Direct compliance violation.",
+            remediation_advice="Immediately abort transaction to prevent severe legal sanctions, asset freezes, and regulatory enforcement.",
+        ))
+
     # Check 1b: Address Poisoning Exploit (Vanity prefix/suffix spoofing)
     for verified_addr, name in VERIFIED_EVM_SPENDERS.items():
         if to_addr != verified_addr and len(to_addr) == 42 and len(verified_addr) == 42:
@@ -181,6 +201,26 @@ def analyze_evm_transaction(tx_data: Dict[str, Any]) -> Tuple[List[PreflightFind
                     title="Zero Minimum Output / Unbounded Slippage (Sandwich Trap)",
                     description="Swap specification has min_amount_out = 0, exposing transaction to 100% MEV sandwich loss.",
                     remediation_advice="Set explicit min_amount_out with maximum 0.5% - 1.0% slippage tolerance.",
+                ))
+
+        # Check 5: Token Transfer to Drainer or Sanctioned Entity
+        elif selector in (SELECTOR_TRANSFER, SELECTOR_TRANSFER_FROM) and len(params) >= 64:
+            recip = decode_evm_address(params[:64])
+            if recip in OFAC_SANCTIONED_ADDRESSES:
+                findings.append(PreflightFinding(
+                    rule_id="PRE-AML-001",
+                    severity="CRITICAL",
+                    title="Direct Transfer to OFAC Sanctioned / Blacklisted Entity",
+                    description=f"Token transfer recipient {recip} is flagged as an OFAC SDN entity ({OFAC_SANCTIONED_ADDRESSES[recip]}).",
+                    remediation_advice="Immediately abort transaction to prevent severe legal sanctions, asset freezes, and regulatory enforcement.",
+                ))
+            elif recip in KNOWN_DRAINER_SINKS:
+                findings.append(PreflightFinding(
+                    rule_id="PRE-EVM-002",
+                    severity="CRITICAL",
+                    title="Direct Transfer to Known Malicious / Drainer Address",
+                    description=f"Token transfer recipient {recip} is flagged as {KNOWN_DRAINER_SINKS[recip]}.",
+                    remediation_advice="Immediately abort this transaction. Do not interact with this destination.",
                 ))
 
         # Check 6: Multicall3 Wrapper & Nested Drainer Inspection

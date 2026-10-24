@@ -152,3 +152,16 @@ def test_evm_multicall3_nested_approval_detected():
     assert res["execution_gate"]["verdict"] == "BLOCK"
     assert res["execution_gate"]["allow_broadcast"] is False
     assert any(f["rule_id"] == "PRE-EVM-008" for f in res["findings"])
+
+
+def test_evm_ofac_sanctioned_entity_blocked():
+    # Tornado Cash Router on OFAC SDN List
+    tx = {
+        "to": "0xd90e2f925da726b50c4ed8d0fb90ad053324f31b",
+        "data": "0x",
+        "value": 100000000000000000,
+    }
+    res = simulate_transaction("ethereum", tx)
+    assert res["execution_gate"]["verdict"] == "BLOCK"
+    assert res["execution_gate"]["allow_broadcast"] is False
+    assert any(f["rule_id"] == "PRE-AML-001" for f in res["findings"])

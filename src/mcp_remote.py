@@ -241,6 +241,34 @@ async def handle_mcp_jsonrpc(
                 },
             }
 
+        # Payment enforcement for paid tools in live modes
+        payment_receipt = "mcp-free"
+        if tool_name in ("scan_code", "simulate_tx", "scrape_url") and payment_mode in ("mainnet", "testnet"):
+            meta = params.get("_meta") or {}
+            session_token = args.get("session_token") or meta.get("session_token") or meta.get("payment")
+            from .session import consume_session_credit
+            consumed = consume_session_credit(db_path, str(session_token)) if session_token else False
+            if not consumed:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {
+                        "code": -40200,
+                        "message": "Payment Required (x402 v2)",
+                        "data": {
+                            "x402Version": 2,
+                            "tool": tool_name,
+                            "accepted_tokens": [
+                                {"chain": "base", "token": "USDC", "recipient": "0xb295E606F38C363b476FC546c27226B5fBcAAEFA"},
+                                {"chain": "solana", "token": "SOL", "recipient": merchant_wallet},
+                            ],
+                            "voucher_activation_tool": "create_session_deposit",
+                            "instructions": "Call create_session_deposit with deposit_tx or supply session_token in params._meta.payment",
+                        },
+                    },
+                }
+            payment_receipt = f"voucher-{str(session_token)[:8]}"
+
         if tool_name == "scan_code":
             source = args.get("source_code") or args.get("code") or ""
             language = args.get("language", "python")
@@ -278,7 +306,7 @@ async def handle_mcp_jsonrpc(
                 execution_time_ms=scan_res.scan_duration_ms,
                 rules_evaluated=rules_cnt,
                 merchant_wallet=merchant_wallet,
-                payment_receipt="mcp-session",
+                payment_receipt=payment_receipt,
             )
 
             gate = a2a_res["execution_gate"]
@@ -322,7 +350,7 @@ async def handle_mcp_jsonrpc(
                 chain=chain,
                 tx_data=tx,
                 merchant_wallet=merchant_wallet,
-                payment_receipt="mcp-session",
+                payment_receipt=payment_receipt,
             )
 
             gate = sim_res["execution_gate"]
@@ -368,7 +396,7 @@ async def handle_mcp_jsonrpc(
                 extract_mode=extract_mode,
                 strip_media=strip_media,
                 merchant_wallet=merchant_wallet,
-                payment_receipt="mcp-session",
+                payment_receipt=payment_receipt,
             )
 
             meta = scrape_res["metadata"]

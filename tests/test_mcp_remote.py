@@ -118,3 +118,24 @@ class TestRemoteMCP:
         data = r.json()
         assert data["status"] == "ready"
         assert "endpoints" in data
+
+    def test_mcp_payment_required_error_code_40200(self, testnet_client):
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {
+                "name": "scan_code",
+                "arguments": {
+                    "source_code": "eval('1+1')",
+                    "language": "python"
+                }
+            }
+        }
+        r = testnet_client.post("/mcp", json=payload)
+        assert r.status_code == 200
+        data = r.json()
+        assert "error" in data
+        assert data["error"]["code"] == -40200
+        assert data["error"]["data"]["x402Version"] == 2
+        assert "accepted_tokens" in data["error"]["data"]
