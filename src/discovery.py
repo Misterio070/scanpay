@@ -179,6 +179,14 @@ def get_bazaar_manifest(merchant: str = MERCHANT_WALLET, evm_merchant: str = MER
                 "price_usd": 0.02,
                 "available": True,
             },
+            {
+                "id": "session-voucher-10",
+                "name": "Prepaid Session Voucher (10 Credits)",
+                "price_usd": 0.85,
+                "credits": 10,
+                "discount_percentage": 15,
+                "available": True,
+            },
         ],
         "capabilities": {
             "max_code_bytes": 102400,

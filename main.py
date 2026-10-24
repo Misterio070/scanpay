@@ -543,6 +543,14 @@ async def products():
         description="Stealth anti-bot web scraping bypassing Cloudflare Turnstile/WAF, returning clean LLM Markdown with cryptographic oracle attestation.",
         available=PAYMENT_MODE != "disabled",
     ))
+    prods.append(ProductInfo(
+        id="session-voucher-10",
+        name="Prepaid Session Voucher (10 Credits)",
+        price_sol=0.006,
+        price_usd_approx=0.85,
+        description="Prepaid batch of 10 operations valid across code scans, tx preflight simulations, and scraper requests. 15% discount with 0ms RPC latency bypass.",
+        available=PAYMENT_MODE != "disabled",
+    ))
     return prods
 
 
