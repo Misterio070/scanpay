@@ -35,6 +35,12 @@ def get_well_known_x402(merchant: str = MERCHANT_WALLET, evm_merchant: str = MER
             "single_scan_lamports": price_lamports,
             "single_scan_sol": price_lamports / 1_000_000_000,
             "single_scan_usdc": 0.10,
+            "preflight_simulate_lamports": 350000,
+            "preflight_simulate_sol": 0.00035,
+            "preflight_simulate_usdc": 0.05,
+            "scraper_oracle_lamports": 150000,
+            "scraper_oracle_sol": 0.00015,
+            "scraper_oracle_usdc": 0.02,
             "session_10_scans_lamports": SESSION_10_LAMPORTS,
             "session_10_scans_sol": SESSION_10_LAMPORTS / 1_000_000_000,
             "session_10_scans_usdc": 0.85,
@@ -75,6 +81,10 @@ def get_well_known_x402(merchant: str = MERCHANT_WALLET, evm_merchant: str = MER
         "endpoints": {
             "scan": f"{CANONICAL_URL}/api/v1/scan",
             "scan_v2": f"{CANONICAL_URL}/v2/scan",
+            "preflight": f"{CANONICAL_URL}/api/v1/preflight/simulate",
+            "preflight_v2": f"{CANONICAL_URL}/v2/preflight/simulate",
+            "scrape": f"{CANONICAL_URL}/api/v1/oracle/scrape",
+            "scrape_v2": f"{CANONICAL_URL}/v2/oracle/scrape",
             "session_deposit": f"{CANONICAL_URL}/api/v1/session/deposit",
             "mcp": f"{CANONICAL_URL}/mcp",
             "sse": f"{CANONICAL_URL}/sse",
@@ -85,7 +95,7 @@ def get_well_known_x402(merchant: str = MERCHANT_WALLET, evm_merchant: str = MER
             "bazaar": {
                 "discoverable": True,
                 "category": "security",
-                "tags": ["code-security", "ast-scanner", "a2a-guardrail", "solana-x402", "auto-remediation"],
+                "tags": ["code-security", "ast-scanner", "tx-simulation", "scraper-oracle", "solana-x402", "auto-remediation"],
             },
             "offer_receipt": {
                 "supported": True,
@@ -104,9 +114,9 @@ def get_bazaar_manifest(merchant: str = MERCHANT_WALLET, evm_merchant: str = MER
     """Returns /bazaar.json metadata for Coinbase CDP and Onyx Bazaar aggregators."""
     return {
         "name": "ScanPay",
-        "description": "Deterministic AST code security scanner with multi-chain x402 micropayments (Solana + Base) and instant auto-remediation for AI agents.",
-        "version": "1.1.0",
-        "engine_version": "1.1.0",
+        "description": "Deterministic AST code security scanner, pre-flight Tx shield, and anti-bot scraper oracle with multi-chain x402 micropayments (Solana + Base) for AI agents.",
+        "version": "1.2.0",
+        "engine_version": "1.2.0",
         "homepage": "https://github.com/Misterio070/scanpay",
         "payment": {
             "protocol": "x402",
@@ -136,7 +146,7 @@ def get_bazaar_manifest(merchant: str = MERCHANT_WALLET, evm_merchant: str = MER
                 "discoverable": True,
                 "category": "security",
                 "service_type": "security-oracle",
-                "tags": ["security", "ast-scanner", "code-auditor", "solana", "base", "x402", "ai-agents"],
+                "tags": ["security", "ast-scanner", "code-auditor", "tx-simulation", "scraper-oracle", "solana", "base", "x402", "ai-agents"],
             }
         },
         "products": [
@@ -145,6 +155,7 @@ def get_bazaar_manifest(merchant: str = MERCHANT_WALLET, evm_merchant: str = MER
                 "name": "Python Security Scan",
                 "language": "python",
                 "rules_count": 28,
+                "price_usd": 0.10,
                 "available": True,
             },
             {
@@ -152,6 +163,20 @@ def get_bazaar_manifest(merchant: str = MERCHANT_WALLET, evm_merchant: str = MER
                 "name": "JavaScript/TypeScript Security Scan",
                 "languages": ["javascript", "typescript", "tsx"],
                 "rules_count": 29,
+                "price_usd": 0.10,
+                "available": True,
+            },
+            {
+                "id": "preflight-simulation",
+                "name": "Pre-Flight Transaction & Drainer Shield",
+                "chains": ["base", "solana", "ethereum"],
+                "price_usd": 0.05,
+                "available": True,
+            },
+            {
+                "id": "scraper-oracle",
+                "name": "Anti-Bot Web Access & Scraper Oracle",
+                "price_usd": 0.02,
                 "available": True,
             },
         ],
@@ -162,6 +187,8 @@ def get_bazaar_manifest(merchant: str = MERCHANT_WALLET, evm_merchant: str = MER
             "executes_code": False,
             "uses_ai": False,
             "auto_remediation": True,
+            "tx_simulation": True,
+            "anti_bot_scraping": True,
             "scanner": "AST (Python: ast module, JS/TS: tree-sitter)",
         },
         "endpoints": {
@@ -169,6 +196,8 @@ def get_bazaar_manifest(merchant: str = MERCHANT_WALLET, evm_merchant: str = MER
             "products": f"{CANONICAL_URL}/api/v1/products",
             "scan": f"{CANONICAL_URL}/api/v1/scan",
             "scan_v2": f"{CANONICAL_URL}/v2/scan",
+            "preflight": f"{CANONICAL_URL}/api/v1/preflight/simulate",
+            "scrape": f"{CANONICAL_URL}/api/v1/oracle/scrape",
             "session_deposit": f"{CANONICAL_URL}/api/v1/session/deposit",
             "mcp": f"{CANONICAL_URL}/mcp",
             "sse": f"{CANONICAL_URL}/sse",
@@ -181,8 +210,8 @@ def get_well_known_mcp() -> dict[str, Any]:
     return {
         "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
         "name": "io.github.Misterio070/scanpay",
-        "description": "Deterministic code security scanner for AI agents. 45+ vulnerability patterns, AST analysis, Solana micropayments via x402.",
-        "version": "1.1.0",
+        "description": "Deterministic code security scanner, Tx Preflight & Anti-Bot Scraper Oracle for AI agents with x402 micropayments.",
+        "version": "1.2.0",
         "repository": {
             "url": "https://github.com/Misterio070/scanpay",
             "source": "github",
@@ -203,12 +232,20 @@ def get_well_known_mcp() -> dict[str, Any]:
                 "description": "Scan source code for security vulnerabilities. Returns AST findings, unified diff patches, and execution verdict.",
             },
             {
+                "name": "simulate_tx",
+                "description": "Pre-flight transaction & drainer shield for EVM and Solana before signing/broadcasting.",
+            },
+            {
+                "name": "scrape_url",
+                "description": "Stealth anti-bot web scraper oracle bypassing Cloudflare Turnstile/WAF, returning clean LLM Markdown.",
+            },
+            {
                 "name": "create_session_deposit",
-                "description": "Prepay 0.006 SOL for 10 instant scans with zero RPC latency.",
+                "description": "Prepay 0.006 SOL or 0.85 Base USDC for 10 instant operations with zero RPC latency.",
             },
             {
                 "name": "health_check",
-                "description": "Check ScanPay service health and AST engine status.",
+                "description": "Check ScanPay service health and active tools status.",
             },
         ],
     }
@@ -219,22 +256,27 @@ def get_agent_card() -> dict[str, Any]:
     return {
         "name": "ScanPay Security Oracle",
         "type": "ai-agent-service",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "protocol_standards": ["x402-v2", "mcp-2024-11-05", "erc-8004", "erc-8183"],
-        "description": "Autonomous security guardrail oracle. Evaluates code generation tasks, detects malicious payloads, issues deterministic fixes, and gates execution.",
+        "description": "Autonomous security guardrail oracle. Evaluates code generation tasks, simulates raw transactions, bypasses anti-bot WAFs, and gates execution.",
         "operator": {
             "wallet": MERCHANT_WALLET,
+            "evm_wallet": MERCHANT_EVM_WALLET,
             "network": SOLANA_CAIP2,
         },
         "pricing": {
             "currency": "SOL",
             "base_fee_lamports": SINGLE_SCAN_LAMPORTS,
+            "preflight_lamports": 350000,
+            "scrape_lamports": 150000,
             "batch_10_voucher_lamports": SESSION_10_LAMPORTS,
         },
         "interfaces": {
             "mcp_remote": f"{CANONICAL_URL}/mcp",
             "mcp_sse": f"{CANONICAL_URL}/sse",
             "x402_api": f"{CANONICAL_URL}/api/v1/scan",
+            "preflight_api": f"{CANONICAL_URL}/api/v1/preflight/simulate",
+            "scraper_api": f"{CANONICAL_URL}/api/v1/oracle/scrape",
             "session_api": f"{CANONICAL_URL}/api/v1/session/deposit",
         },
     }
@@ -242,68 +284,70 @@ def get_agent_card() -> dict[str, Any]:
 
 SKILL_MD = """---
 name: scanpay
-description: Deterministic code security scanner and execution gate for AI agents. Audits Python and JavaScript/TypeScript code before execution to prevent arbitrary code execution, wallet exfiltration, SSRF, and supply chain attacks.
+description: Deterministic code security scanner, Pre-flight Tx Shield, and Anti-Bot Scraper Oracle for AI agents. Audits code with deterministic auto_remediation, simulates blockchain transactions, and extracts clean web content via x402 micropayments.
 ---
 
-# ScanPay Security Guardrail Skill
+# ScanPay Security Guardrail & Agent Oracle Skill
 
-Use ScanPay whenever you are asked to generate or execute Python, JavaScript, or TypeScript code that handles wallets, network requests, or system processes.
+Use ScanPay whenever you need to:
+1. **Audit generated code** before execution with deterministic `auto_remediation` (`scan_code`).
+2. **Simulate a blockchain transaction** on Base or Solana before broadcasting (`simulate_tx`).
+3. **Scrape anti-bot protected web pages** or documentation into clean Markdown (`scrape_url`).
 
-## Workflow
+## Available Tools
 
-1. Before writing to disk or executing code, send source code to ScanPay.
-2. If vulnerabilities are found, inspect the `auto_remediation.unified_diff` patch.
-3. If `execution_gate.verdict` is `BLOCK`, do NOT execute unpatched code.
-4. Apply the deterministic patch or reject the task.
+### 1. `scan_code`
+Scan Python or JS/TS code for 45+ vulnerability patterns.
+```json
+{
+  "source_code": "import ast\\n...",
+  "language": "python",
+  "auto_remediate": true
+}
+```
 
-## API Endpoint
-- URL: `https://scanpay-ob3w.onrender.com/api/v1/scan`
-- Method: `POST`
-- Headers:
-  - `Content-Type: application/json`
-  - `X-SCANPAY-SESSION: <optional_session_voucher>`
-  - `X-PAYMENT: <solana_tx_sig>` (if paying per-scan)
-- Body:
-  ```json
-  {
-    "source_code": "<your_code_here>",
-    "language": "python",
-    "auto_remediate": true
+### 2. `simulate_tx`
+Inspect an EVM or Solana transaction for drainer signatures, honeypots, or unbounded slippage.
+```json
+{
+  "chain": "base",
+  "tx": {
+    "to": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "data": "0x095ea7b3..."
   }
-  ```
+}
+```
 
-## Remote MCP
-- SSE: `https://scanpay-ob3w.onrender.com/sse`
-- HTTP: `https://scanpay-ob3w.onrender.com/mcp`
+### 3. `scrape_url`
+Bypass Cloudflare Turnstile, extract clean Markdown from any web page.
+```json
+{
+  "url": "https://docs.solana.com",
+  "extract_mode": "markdown",
+  "strip_media": true
+}
+```
+
+## Remote MCP Access
+- **JSON-RPC endpoint:** `POST https://scanpay-ob3w.onrender.com/mcp`
+- **SSE Stream:** `GET https://scanpay-ob3w.onrender.com/sse`
 """
 
-PAY_MD = """# ScanPay Multi-Chain x402 Payment Specification
+PAY_MD = """# ScanPay Multi-Chain Settlement Rules (x402 v2)
 
-ScanPay accepts micropayments for security evaluations across Solana and Base (EVM).
+ScanPay accepts micropayments on both Solana and Base (EVM).
 
-## Payment Rails & Merchant Addresses
+## Accepted Currencies & Pricing Matrix
 
-### 1. Solana Mainnet-Beta
-- **Network:** `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`
-- **Merchant Wallet:** `JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4`
-- **Native SOL Price:** `700,000 lamports` (~0.0007 SOL / ~$0.10 USD)
-- **USDC (SPL Token):** `100,000 units` (0.10 USDC) — Mint: `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`
-- **Prepaid 10-Scan Voucher:** `6,000,000 lamports` (~0.006 SOL / 15% discount)
+| Service | Solana (SOL) | Solana (USDC) | Base (USDC) |
+|---|---|---|---|
+| **Code Scan** | 0.0007 SOL (700,000 lamports) | 0.10 USDC (100,000 units) | 0.10 USDC (100,000 units) |
+| **Tx Simulation** | 0.00035 SOL (350,000 lamports) | 0.05 USDC (50,000 units) | 0.05 USDC (50,000 units) |
+| **Scraper Oracle** | 0.00015 SOL (150,000 lamports) | 0.02 USDC (20,000 units) | 0.02 USDC (20,000 units) |
+| **10-Credit Voucher** | 0.006 SOL (6,000,000 lamports) | 0.85 USDC (850,000 units) | 0.85 USDC (850,000 units) |
 
-### 2. Base Mainnet (Coinbase / EVM)
-- **Network:** `eip155:8453`
-- **Merchant Wallet:** `0xb295E606F38C363b476FC546c27226B5fBcAAEFA`
-- **USDC (Native):** `100,000 units` (0.10 USDC) — Token: `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`
-- **Native ETH:** Accepted at fair market rate ($0.10 equivalent)
-
-## Autonomous Settlement Instructions
-
-1. **Per-Scan Micropayment:**
-   Send 0.0007 SOL or 0.10 USDC (Solana or Base).
-   Pass the transaction signature / hash in the `X-PAYMENT` header or `tx_signature` body parameter.
-
-2. **Session Voucher (0ms Latency Loop):**
-   Deposit 0.006 SOL on Solana or 0.85 USDC on Base.
-   Call `POST /api/v1/session/deposit` with `{"deposit_tx": "<tx_sig>"}`.
-   Use the returned `session_token` in `X-SCANPAY-SESSION` header for 10 instant scans without waiting for on-chain finality.
+## Merchant Addresses
+- **Solana Merchant Wallet:** `JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4`
+- **Base (EVM) Merchant Wallet:** `0xb295E606F38C363b476FC546c27226B5fBcAAEFA`
+- **Base USDC Contract:** `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`
 """

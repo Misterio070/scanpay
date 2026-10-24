@@ -1,14 +1,34 @@
-# ScanPay
+# ScanPay A2A Security Oracle & Infrastructure Suite
 
-ScanPay is an autonomous code security scanner and execution gate with x402 Solana micropayments for AI agents.
+ScanPay is an autonomous security guardrail and oracle suite for AI agents with x402 v2 micropayments on Solana and Base.
 
 - Production URL: https://scanpay-ob3w.onrender.com
 - Remote MCP SSE: https://scanpay-ob3w.onrender.com/sse
 - Remote MCP HTTP: https://scanpay-ob3w.onrender.com/mcp
-- Payment: Solana mainnet x402 micropayments, 0.0007 SOL (~$0.10) per scan
-- Prepaid Session Voucher: 0.006 SOL for 10 instant scans (POST /api/v1/session/deposit)
-- Merchant Wallet: JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4
-- Languages: Python, JavaScript, TypeScript, TSX
-- Capabilities: Deterministic AST analysis, 45+ vulnerability patterns, automatic patch generation, unified diffs, execution gating (PASS, WARN, BLOCK).
-- npm: scanpay-cli@1.0.0, scanpay-mcp-server@0.3.1
+- Multi-Chain Settlement:
+  - Solana: Native SOL & SPL USDC (Merchant: `JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4`)
+  - Base: Native USDC (Merchant: `0xb295E606F38C363b476FC546c27226B5fBcAAEFA`, USDC: `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`)
+
+## Core Capabilities & Services:
+
+1. Code Security Scanner & Auto-Remediator (`scan_code`)
+   - Endpoints: `POST /api/v1/scan`, `POST /v2/scan`
+   - Pricing: 0.10 USDC or 0.0007 SOL
+   - 45+ AST vulnerability patterns, deterministic patches, unified diffs, execution verdicts (PASS, WARN, BLOCK).
+
+2. Pre-Flight Transaction & Drainer Shield (`simulate_tx`)
+   - Endpoints: `POST /api/v1/preflight/simulate`, `POST /v2/preflight/simulate`
+   - Pricing: 0.05 USDC or 0.00035 SOL
+   - Preflight inspection for Base/Ethereum and Solana transactions. Detects honeypots, unlimited token approvals, known drainer contracts, and MEV sandwich traps.
+
+3. Anti-Bot Web Access & Scraper Oracle (`scrape_url`)
+   - Endpoints: `POST /api/v1/oracle/scrape`, `POST /v2/oracle/scrape`
+   - Pricing: 0.02 USDC or 0.00015 SOL
+   - Stealth browser headers, Cloudflare Turnstile/WAF bypass, HTML-to-clean-Markdown extraction saving ~90% LLM context tokens.
+
+4. Prepaid Session Micro-Vouchers
+   - Endpoint: `POST /api/v1/session/deposit`
+   - Pricing: 0.85 USDC or 0.006 SOL (10 credits valid across all tools with 0ms RPC bypass).
+   - Authenticated via `X-SCANPAY-SESSION` header.
+
 - GitHub: https://github.com/Misterio070/scanpay

@@ -34,7 +34,7 @@ import os
 import sqlite3
 import sys
 import time
-from typing import Any, Literal, Optional
+from typing import Any, Dict, Literal, Optional
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -60,7 +60,9 @@ from src.discovery import (
 )
 from src.engine import RULES as PY_RULES, scan as scan_python, sha256_hex
 from src.mcp_remote import handle_mcp_jsonrpc
+from src.preflight import simulate_transaction
 from src.remediator import build_a2a_response
+from src.scraper_oracle import scrape_url
 from src.session import (
     SESSION_BATCH_PRICE_LAMPORTS,
     consume_session_credit,
@@ -197,23 +199,45 @@ def record_scan(tx_sig: str, language: str, source_hash: str, findings_count: in
 
 # --- x402 v2 payment requirements ---------------------------------------------
 
-def build_x402_requirements() -> dict:
+def build_x402_requirements(service: str = "scan") -> dict:
+    if service == "preflight":
+        lamports = 350000
+        sol_display = "0.00035 SOL"
+        usdc_units = 50000
+        usdc_display = "0.05 USDC"
+        desc = "ScanPay: pre-flight transaction & drainer simulation"
+        tags = ["tx-simulation", "drainer-shield", "mev-protection", "solana-x402"]
+    elif service == "scrape":
+        lamports = 150000
+        sol_display = "0.00015 SOL"
+        usdc_units = 20000
+        usdc_display = "0.02 USDC"
+        desc = "ScanPay: anti-bot web scraping & LLM markdown extraction"
+        tags = ["scraper-oracle", "anti-bot", "cloudflare-bypass", "markdown-extraction"]
+    else:
+        lamports = PRICE_LAMPORTS
+        sol_display = f"{PRICE_SOL} SOL"
+        usdc_units = 100000
+        usdc_display = "0.10 USDC"
+        desc = "ScanPay: code security scan"
+        tags = ["code-security", "ast-scanner", "a2a-guardrail", "solana-x402"]
+
     reqs = {
         "x402Version": X402_VERSION,
         "scheme": "solana",
         "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" if PAYMENT_MODE == "mainnet" else ("solana-" + PAYMENT_MODE if PAYMENT_MODE != "disabled" else "solana-devnet"),
-        "amount": PRICE_LAMPORTS,
-        "amount_display": f"{PRICE_SOL} SOL",
+        "amount": lamports,
+        "amount_display": sol_display,
         "asset": "SOL",
         "recipient": MERCHANT_WALLET or "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4",
-        "description": "ScanPay: code security scan",
+        "description": desc,
         "mimeType": "application/json",
         "maxTimeoutSeconds": PAYMENT_TIMEOUT_S,
         "extensions": {
             "bazaar": {
                 "discoverable": True,
                 "category": "security",
-                "tags": ["code-security", "ast-scanner", "a2a-guardrail", "solana-x402"]
+                "tags": tags,
             },
             "session_voucher": {
                 "supported": True,
@@ -227,16 +251,16 @@ def build_x402_requirements() -> dict:
                 "scheme": "solana",
                 "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" if PAYMENT_MODE == "mainnet" else ("solana-" + ("devnet" if PAYMENT_MODE == "testnet" else "devnet")),
                 "asset": "SOL",
-                "amount": PRICE_LAMPORTS,
-                "amount_display": f"{PRICE_SOL} SOL",
+                "amount": lamports,
+                "amount_display": sol_display,
                 "recipient": MERCHANT_WALLET or "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4",
             },
             {
                 "scheme": "solana",
                 "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" if PAYMENT_MODE == "mainnet" else ("solana-" + ("devnet" if PAYMENT_MODE == "testnet" else "devnet")),
                 "asset": "USDC",
-                "amount": 100000,
-                "amount_display": "0.10 USDC",
+                "amount": usdc_units,
+                "amount_display": usdc_display,
                 "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
                 "recipient": MERCHANT_WALLET or "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4",
             },
@@ -244,8 +268,8 @@ def build_x402_requirements() -> dict:
                 "scheme": "evm",
                 "network": "eip155:8453",
                 "asset": "USDC",
-                "amount": 100000,
-                "amount_display": "0.10 USDC",
+                "amount": usdc_units,
+                "amount_display": usdc_display,
                 "tokenContract": BASE_USDC_CONTRACT,
                 "recipient": MERCHANT_EVM_WALLET,
             },
@@ -256,8 +280,8 @@ def build_x402_requirements() -> dict:
     return reqs
 
 
-def x402_response(message: str = "Payment required") -> JSONResponse:
-    reqs = build_x402_requirements()
+def x402_response(message: str = "Payment required", service: str = "scan") -> JSONResponse:
+    reqs = build_x402_requirements(service=service)
     return JSONResponse(
         status_code=402,
         content={
@@ -417,6 +441,19 @@ class SessionDepositRequest(BaseModel):
     payer_wallet: Optional[str] = None
 
 
+class PreflightRequest(BaseModel):
+    chain: str = Field(default="base")
+    tx: Dict[str, Any] = Field(...)
+    tx_signature: Optional[str] = None
+
+
+class ScrapeRequest(BaseModel):
+    url: str = Field(..., min_length=3)
+    extract_mode: str = Field(default="markdown")
+    strip_media: bool = Field(default=True)
+    tx_signature: Optional[str] = None
+
+
 class ProductInfo(BaseModel):
     id: str
     name: str
@@ -490,6 +527,22 @@ async def products():
                         "child_process, prototype pollution, ReDoS, wallet exfiltration, and 29 vulnerability patterns.",
             available=PAYMENT_MODE != "disabled",
         ))
+    prods.append(ProductInfo(
+        id="preflight-simulation",
+        name="Pre-Flight Transaction & Drainer Shield",
+        price_sol=0.00035,
+        price_usd_approx=0.05,
+        description="Simulates EVM and Solana transactions before broadcast. Detects honeypots, unlimited token approvals, known drainers, and sandwich slippage traps.",
+        available=PAYMENT_MODE != "disabled",
+    ))
+    prods.append(ProductInfo(
+        id="scraper-oracle",
+        name="Anti-Bot Web Access & Scraper Oracle",
+        price_sol=0.00015,
+        price_usd_approx=0.02,
+        description="Stealth anti-bot web scraping bypassing Cloudflare Turnstile/WAF, returning clean LLM Markdown with cryptographic oracle attestation.",
+        available=PAYMENT_MODE != "disabled",
+    ))
     return prods
 
 
@@ -667,6 +720,154 @@ async def session_deposit(req: SessionDepositRequest):
     )
 
 
+# --- Pre-Flight Transaction & Drainer Shield ---------------------------------
+
+@app.post("/api/v1/preflight/simulate")
+@app.post("/v2/preflight/simulate")
+async def preflight_simulate(
+    req: PreflightRequest,
+    request: Request,
+    x_payment: Optional[str] = Header(None, alias="X-PAYMENT"),
+    payment_signature: Optional[str] = Header(None, alias="PAYMENT-SIGNATURE"),
+    x_scanpay_session: Optional[str] = Header(None, alias="X-SCANPAY-SESSION"),
+    x_payment_session: Optional[str] = Header(None, alias="X-PAYMENT-SESSION"),
+):
+    session_token = x_scanpay_session or x_payment_session
+    payment_is_session = False
+    payment_proof = None
+
+    if session_token:
+        claimed, remaining, msg = consume_session_credit(DB_PATH, session_token)
+        if not claimed:
+            raise HTTPException(status_code=402, detail=f"Session voucher invalid: {msg}")
+        payment_proof = session_token
+        payment_is_session = True
+
+    if not payment_is_session:
+        payment_proof = x_payment or payment_signature or req.tx_signature
+        if payment_proof and len(payment_proof) > 100:
+            try:
+                decoded = base64.b64decode(payment_proof).decode("utf-8")
+                parsed_json = json.loads(decoded)
+                payment_proof = parsed_json.get("tx_signature") or parsed_json.get("signature") or payment_proof
+            except Exception:
+                pass
+
+        if not payment_proof:
+            return x402_response("Payment required. Pre-flight simulation requires 0.05 USDC or 0.00035 SOL.", service="preflight")
+
+        if PAYMENT_MODE == "disabled":
+            return x402_response("Payment verification disabled.", service="preflight")
+
+        if not check_payment(payment_proof):
+            try:
+                if payment_proof.startswith("0x") and len(payment_proof) == 66:
+                    result = await verify_evm_tx(payment_proof, min_usdc=50000)
+                else:
+                    result = await verify_solana_tx(payment_proof, min_lamports=350000)
+                store_payment(payment_proof, result["payer"], result["amount_lamports"], result["network"])
+            except ValueError as e:
+                raise HTTPException(status_code=402, detail=f"Payment verification failed: {e}")
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"RPC error: {e}")
+
+        if not check_payment(payment_proof):
+            raise HTTPException(status_code=402, detail="Payment proof already used.")
+        if not mark_payment_used(payment_proof):
+            raise HTTPException(status_code=402, detail="Payment proof already used.")
+
+    res = simulate_transaction(
+        chain=req.chain,
+        tx_data=req.tx,
+        merchant_wallet=MERCHANT_WALLET,
+        payment_receipt=payment_proof,
+    )
+
+    verdict = res.get("execution_gate", {}).get("verdict", "WARN")
+    status_header = "ALLOWED" if verdict == "ALLOW" else ("WARNED" if verdict == "WARN" else "BLOCKED")
+
+    return JSONResponse(
+        content=res,
+        headers={
+            "X-SCANPAY-SIMULATION-VERDICT": status_header,
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
+
+
+# --- Anti-Bot Web Access & Scraper Oracle ------------------------------------
+
+@app.post("/api/v1/oracle/scrape")
+@app.post("/v2/oracle/scrape")
+async def oracle_scrape(
+    req: ScrapeRequest,
+    request: Request,
+    x_payment: Optional[str] = Header(None, alias="X-PAYMENT"),
+    payment_signature: Optional[str] = Header(None, alias="PAYMENT-SIGNATURE"),
+    x_scanpay_session: Optional[str] = Header(None, alias="X-SCANPAY-SESSION"),
+    x_payment_session: Optional[str] = Header(None, alias="X-PAYMENT-SESSION"),
+):
+    session_token = x_scanpay_session or x_payment_session
+    payment_is_session = False
+    payment_proof = None
+
+    if session_token:
+        claimed, remaining, msg = consume_session_credit(DB_PATH, session_token)
+        if not claimed:
+            raise HTTPException(status_code=402, detail=f"Session voucher invalid: {msg}")
+        payment_proof = session_token
+        payment_is_session = True
+
+    if not payment_is_session:
+        payment_proof = x_payment or payment_signature or req.tx_signature
+        if payment_proof and len(payment_proof) > 100:
+            try:
+                decoded = base64.b64decode(payment_proof).decode("utf-8")
+                parsed_json = json.loads(decoded)
+                payment_proof = parsed_json.get("tx_signature") or parsed_json.get("signature") or payment_proof
+            except Exception:
+                pass
+
+        if not payment_proof:
+            return x402_response("Payment required. Anti-bot scraper oracle requires 0.02 USDC or 0.00015 SOL.", service="scrape")
+
+        if PAYMENT_MODE == "disabled":
+            return x402_response("Payment verification disabled.", service="scrape")
+
+        if not check_payment(payment_proof):
+            try:
+                if payment_proof.startswith("0x") and len(payment_proof) == 66:
+                    result = await verify_evm_tx(payment_proof, min_usdc=20000)
+                else:
+                    result = await verify_solana_tx(payment_proof, min_lamports=150000)
+                store_payment(payment_proof, result["payer"], result["amount_lamports"], result["network"])
+            except ValueError as e:
+                raise HTTPException(status_code=402, detail=f"Payment verification failed: {e}")
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"RPC error: {e}")
+
+        if not check_payment(payment_proof):
+            raise HTTPException(status_code=402, detail="Payment proof already used.")
+        if not mark_payment_used(payment_proof):
+            raise HTTPException(status_code=402, detail="Payment proof already used.")
+
+    res = await scrape_url(
+        url=req.url,
+        extract_mode=req.extract_mode,
+        strip_media=req.strip_media,
+        merchant_wallet=MERCHANT_WALLET,
+        payment_receipt=payment_proof,
+    )
+
+    return JSONResponse(
+        content=res,
+        headers={
+            "X-SCANPAY-WAF-DETECTED": str(res["bot_protection"]["waf_detected"]).lower(),
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
+
+
 @app.get("/api/v1/verify-payment/{tx_sig}")
 async def verify_payment(tx_sig: str):
     if PAYMENT_MODE == "disabled":
@@ -815,7 +1016,7 @@ async def mcp_post(request: Request):
             content={"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
             headers={"Access-Control-Allow-Origin": "*"}
         )
-    result = handle_mcp_jsonrpc(
+    result = await handle_mcp_jsonrpc(
         request_data=body,
         merchant_wallet=MERCHANT_WALLET,
         payment_mode=PAYMENT_MODE,

@@ -33,6 +33,30 @@ class ScanPayMCP {
         }
       },
       {
+        name: 'simulate_tx',
+        description: 'Pre-flight transaction & drainer shield. Simulates EVM or Solana transactions before broadcast, detecting honeypots, unlimited token approvals, and sandwich traps.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            chain: { type: 'string', enum: ['base', 'ethereum', 'solana'], default: 'base' },
+            tx: { type: 'object', description: 'Transaction payload' }
+          },
+          required: ['chain', 'tx']
+        }
+      },
+      {
+        name: 'scrape_url',
+        description: 'Anti-bot web access & scraper oracle. Bypasses Cloudflare Turnstile/WAF, returning clean token-efficient Markdown for LLMs.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            url: { type: 'string', description: 'Target URL to scrape' },
+            extract_mode: { type: 'string', enum: ['markdown', 'text', 'raw_html'], default: 'markdown' }
+          },
+          required: ['url']
+        }
+      },
+      {
         name: 'list_products',
         description: 'List available ScanPay products and their prices.',
         inputSchema: { type: 'object', properties: {} }
@@ -71,6 +95,10 @@ class ScanPayMCP {
     switch (name) {
       case 'scan_code':
         return await this.scanCode(args.source_code, args.language);
+      case 'simulate_tx':
+        return await this.postJson('/api/v1/preflight/simulate', args);
+      case 'scrape_url':
+        return await this.postJson('/api/v1/oracle/scrape', args);
       case 'list_products':
         return await this.listProducts();
       case 'health_check':
@@ -78,6 +106,46 @@ class ScanPayMCP {
       default:
         return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
     }
+  }
+
+  async postJson(endpoint, payload) {
+    return new Promise((resolve) => {
+      const data = JSON.stringify(payload);
+      const url = new URL(endpoint, DEFAULT_URL);
+      const client = getHttpClient(url);
+      const options = {
+        hostname: url.hostname,
+        port: url.port || (url.protocol === 'https:' ? 443 : 80),
+        path: url.pathname,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }
+      };
+      const req = client.request(options, (res) => {
+        let body = '';
+        res.on('data', (chunk) => body += chunk);
+        res.on('end', () => {
+          if (res.statusCode === 402) {
+            try {
+              const payment = JSON.parse(body);
+              resolve({
+                content: [{
+                  type: 'text',
+                  text: `Payment required: ${payment.paymentRequirements.amount_display} to ${payment.paymentRequirements.recipient}. Send payment and retry with X-PAYMENT header.`
+                }],
+                isError: false
+              });
+            } catch {
+              resolve({ content: [{ type: 'text', text: body }], isError: true });
+            }
+          } else {
+            resolve({ content: [{ type: 'text', text: body }], isError: false });
+          }
+        });
+      });
+      req.on('error', (e) => resolve({ content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true }));
+      req.write(data);
+      req.end();
+    });
   }
 
   async scanCode(sourceCode, language) {

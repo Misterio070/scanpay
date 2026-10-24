@@ -12,6 +12,8 @@ from typing import Any, Optional
 
 from .engine import scan as scan_python, RULES as PY_RULES, sha256_hex
 from .remediator import build_a2a_response
+from .preflight import simulate_transaction
+from .scraper_oracle import scrape_url
 
 try:
     from .engine_js import scan as scan_javascript, RULES as JS_RULES
@@ -54,21 +56,76 @@ MCP_TOOLS = [
         },
     },
     {
+        "name": "simulate_tx",
+        "description": (
+            "Pre-flight transaction & drainer shield for AI agents. Simulates and inspects EVM (Base/Ethereum) "
+            "and Solana transactions before signing or broadcasting. Detects unlimited approvals, known drainers, "
+            "honeypots, MEV sandwich exposure (min_output=0), and unauthorized Solana authority takeovers. "
+            "Returns execution verdict (ALLOW, WARN, BLOCK) and cryptographic oracle attestation."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "chain": {
+                    "type": "string",
+                    "enum": ["base", "ethereum", "solana"],
+                    "default": "base",
+                    "description": "Target blockchain network",
+                },
+                "tx": {
+                    "type": "object",
+                    "description": "Transaction payload (EVM: to, data, value; Solana: instructions)",
+                },
+            },
+            "required": ["chain", "tx"],
+        },
+    },
+    {
+        "name": "scrape_url",
+        "description": (
+            "Anti-bot web access & scraper oracle for AI agents. Fetches web pages with stealth headers "
+            "to bypass Cloudflare Turnstile, WAFs, and anti-bot challenges. Purifies HTML by removing scripts, "
+            "stylesheets, tracking pixels, ads, and navigation boilerplate, returning clean, token-efficient "
+            "Markdown ready for LLM consumption with cryptographic oracle attestation."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "Target URL to scrape",
+                },
+                "extract_mode": {
+                    "type": "string",
+                    "enum": ["markdown", "text", "raw_html"],
+                    "default": "markdown",
+                    "description": "Extracted content format",
+                },
+                "strip_media": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Strip image tags and heavy media to conserve LLM context tokens",
+                },
+            },
+            "required": ["url"],
+        },
+    },
+    {
         "name": "create_session_deposit",
         "description": (
-            "Activate a prepaid session voucher (0.006 SOL for 10 scans). "
-            "Eliminates per-scan payment prompts and RPC latency in autonomous coding loops."
+            "Activate a prepaid session voucher (0.006 SOL or 0.85 Base USDC for 10 operations). "
+            "Eliminates per-request payment prompts and RPC latency in autonomous agent loops."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "deposit_tx": {
                     "type": "string",
-                    "description": "Solana transaction signature transferring >= 0.006 SOL to merchant wallet",
+                    "description": "Transaction signature/hash transferring payment to merchant wallet",
                 },
                 "payer_wallet": {
                     "type": "string",
-                    "description": "Solana public key of the payer",
+                    "description": "Public key / address of the payer",
                 },
             },
             "required": ["deposit_tx"],
@@ -85,13 +142,13 @@ MCP_TOOLS = [
 ]
 
 
-def handle_mcp_jsonrpc(
+async def handle_mcp_jsonrpc(
     request_data: dict[str, Any],
     merchant_wallet: str,
     payment_mode: str,
     db_path: str,
 ) -> dict[str, Any]:
-    """Process a Model Context Protocol JSON-RPC request."""
+    """Process a Model Context Protocol JSON-RPC request asynchronously."""
     req_id = request_data.get("id")
     method = request_data.get("method")
     params = request_data.get("params") or {}
@@ -116,8 +173,8 @@ def handle_mcp_jsonrpc(
                 },
                 "serverInfo": {
                     "name": "scanpay",
-                    "version": "1.1.0",
-                    "description": "Deterministic AST code security scanner with x402 Solana micropayments",
+                    "version": "1.2.0",
+                    "description": "Deterministic AST code security scanner, Tx Preflight & Scraper Oracle with x402 micropayments",
                 },
             },
         }
@@ -152,9 +209,10 @@ def handle_mcp_jsonrpc(
                             "type": "text",
                             "text": json.dumps({
                                 "status": "ok",
-                                "engine_version": "1.1.0",
+                                "engine_version": "1.2.0",
                                 "payment_mode": payment_mode,
                                 "merchant_wallet": merchant_wallet,
+                                "tools_active": [t["name"] for t in MCP_TOOLS],
                                 "python_rules": len(PY_RULES),
                                 "js_rules": len(JS_RULES),
                                 "js_available": JS_AVAILABLE,
@@ -223,7 +281,6 @@ def handle_mcp_jsonrpc(
                 payment_receipt="mcp-session",
             )
 
-            # Build human & machine friendly response
             gate = a2a_res["execution_gate"]
             remediation = a2a_res["auto_remediation"]
             summary_lines = [
@@ -248,6 +305,93 @@ def handle_mcp_jsonrpc(
                     "content": content,
                     "execution_gate": gate,
                     "auto_remediation": remediation,
+                },
+            }
+
+        if tool_name == "simulate_tx":
+            chain = args.get("chain", "base")
+            tx = args.get("tx")
+            if not isinstance(tx, dict):
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {"code": -32602, "message": "Missing required argument 'tx' (dict)"},
+                }
+
+            sim_res = simulate_transaction(
+                chain=chain,
+                tx_data=tx,
+                merchant_wallet=merchant_wallet,
+                payment_receipt="mcp-session",
+            )
+
+            gate = sim_res["execution_gate"]
+            summary_lines = [
+                f"Simulation Verdict: {gate['verdict']} (Risk Score: {gate['risk_score']}/100, Max Severity: {gate['max_severity']})",
+                f"Allow Broadcast: {gate['allow_broadcast']}",
+                f"Chain: {sim_res['chain']}",
+                f"Findings: {len(sim_res['findings'])} threat indicators detected.",
+            ]
+            for f in sim_res["findings"]:
+                summary_lines.append(f"- [{f['severity']}] {f['title']}: {f['description']}")
+
+            content = [
+                {"type": "text", "text": "\n".join(summary_lines)},
+                {"type": "text", "text": json.dumps(sim_res, indent=2)},
+            ]
+
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "content": content,
+                    "execution_gate": gate,
+                    "simulated_deltas": sim_res["simulated_deltas"],
+                    "attestation": sim_res["attestation"],
+                },
+            }
+
+        if tool_name == "scrape_url":
+            url = args.get("url")
+            if not url:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {"code": -32602, "message": "Missing required argument 'url'"},
+                }
+
+            extract_mode = args.get("extract_mode", "markdown")
+            strip_media = bool(args.get("strip_media", True))
+
+            scrape_res = await scrape_url(
+                url=url,
+                extract_mode=extract_mode,
+                strip_media=strip_media,
+                merchant_wallet=merchant_wallet,
+                payment_receipt="mcp-session",
+            )
+
+            meta = scrape_res["metadata"]
+            summary_lines = [
+                f"Scraped: {scrape_res['request']['target_url']} (HTTP {scrape_res['request']['status_code']})",
+                f"Title: {meta['title']}",
+                f"WAF Detected: {scrape_res['bot_protection']['waf_detected']} ({scrape_res['bot_protection']['challenge_type']})",
+                f"Words: {meta['word_count']} (~{meta['token_estimate']} tokens)",
+            ]
+
+            content = [
+                {"type": "text", "text": "\n".join(summary_lines)},
+                {"type": "text", "text": scrape_res["content"]},
+            ]
+
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "content": content,
+                    "metadata": meta,
+                    "bot_protection": scrape_res["bot_protection"],
+                    "attestation": scrape_res["attestation"],
                 },
             }
 
