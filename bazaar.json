@@ -1,8 +1,8 @@
 {
   "name": "ScanPay",
   "description": "Deterministic AST code security scanner with x402 Solana micropayments and instant auto-remediation for AI agents.",
-  "version": "1.1.0",
-  "engine_version": "1.1.0",
+  "version": "1.2.0",
+  "engine_version": "1.2.0",
   "homepage": "https://github.com/Misterio070/scanpay",
   "payment": {
     "protocol": "x402",

@@ -14,9 +14,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy application code and discovery assets
 COPY main.py ./
 COPY src/ ./src/
+COPY llms.txt ./
+COPY bazaar.json ./
+COPY glama.json ./
+COPY package.json ./
+COPY smithery.yaml ./
+COPY README.md ./
+COPY social-preview.svg ./
 
 # Default configuration
 ENV SCANPAY_PORT=8484

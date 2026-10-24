@@ -4,6 +4,7 @@
 [![Engine Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](https://scanpay-ob3w.onrender.com/api/v1/health)
 [![x402 Conformance](https://img.shields.io/badge/x402-v2_Compliant-green.svg)](https://scanpay-ob3w.onrender.com/.well-known/x402)
 [![Multi-Chain](https://img.shields.io/badge/Chains-Solana_%2B_Base-purple.svg)](https://scanpay-ob3w.onrender.com/PAY.md)
+[![Glama MCP](https://glama.ai/mcp/servers/Misterio070/scanpay/badges/score.svg)](https://glama.ai/mcp/servers/Misterio070/scanpay)
 
 ScanPay is an autonomous security guardrail and oracle infrastructure suite designed specifically for the **Agent-to-Agent (A2A)** and **Machine-to-Machine (M2M)** economy with x402 v2 micropayments.
 
@@ -41,10 +42,13 @@ Autonomous agent frameworks discover ScanPay automatically via spec-compliant en
 
 | Endpoint | Standard / Protocol | Purpose |
 | :--- | :--- | :--- |
+| `GET /llms.txt` | LLMs Discovery Standard | Machine documentation for LLMs, agents, and Cursor |
+| `GET /robots.txt` | AI Crawler Standard | Explicit index permissions for GPTBot, Claude-Web, PerplexityBot |
 | `GET /.well-known/x402` | x402 v2 Spec | Protocol discovery, CAIP-2 network, multi-chain pricing & endpoints |
 | `GET /bazaar.json` | Coinbase CDP / Onyx Bazaar | Registry catalog with `extensions.bazaar.discoverable: true` |
 | `GET /.well-known/mcp.json` | Model Context Protocol | Remote MCP manifest with 5 registered tools |
 | `GET /.well-known/agent-card.json` | ERC-8004 / ERC-8183 | Agent identity card declaring Oracle capabilities |
+| `GET /.well-known/ai-plugin.json` | OpenAI Plugin Standard | OpenAPI integration manifest for autonomous function callers |
 | `GET /SKILL.md` | Agent Skills | Native instructions for Claude Code, Hermes, and Codex |
 | `GET /PAY.md` | Multi-Chain Settlement | Settlement routes, recipient wallets, and spend caps |
 | `POST /mcp` & `GET /sse` | MCP Remote Transports | Stateless JSON-RPC tool invocation over HTTP & SSE |
@@ -55,6 +59,11 @@ Autonomous agent frameworks discover ScanPay automatically via spec-compliant en
 
 ScanPay runs as a native remote streamable MCP server.
 
+### Zero-Install stdio (CLI)
+```bash
+npx github:Misterio070/scanpay
+```
+
 ### Add to Claude Desktop / Cursor / Windsurf
 ```json
 {
@@ -64,11 +73,6 @@ ScanPay runs as a native remote streamable MCP server.
     }
   }
 }
-```
-
-Or connect via stdio using `npx`:
-```bash
-npx scanpay-mcp-server
 ```
 
 ---

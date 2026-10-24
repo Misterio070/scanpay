@@ -963,6 +963,92 @@ async def pay_route():
     )
 
 
+LLMS_TXT_CONTENT = """# ScanPay A2A Security Oracle & Infrastructure Suite
+
+ScanPay is an autonomous security guardrail and oracle suite for AI agents with x402 v2 micropayments on Solana and Base.
+
+- Production URL: https://scanpay-ob3w.onrender.com
+- Remote MCP SSE: https://scanpay-ob3w.onrender.com/sse
+- Remote MCP HTTP: https://scanpay-ob3w.onrender.com/mcp
+- Multi-Chain Settlement:
+  - Solana: Native SOL & SPL USDC (Merchant: `JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4`)
+  - Base: Native USDC (Merchant: `0xb295E606F38C363b476FC546c27226B5fBcAAEFA`, USDC: `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`)
+
+## Core Capabilities & Services:
+
+1. Code Security Scanner & Auto-Remediator (`scan_code`)
+   - Endpoints: `POST /api/v1/scan`, `POST /v2/scan`
+   - Pricing: 0.10 USDC or 0.0007 SOL
+   - 45+ AST vulnerability patterns, deterministic patches, unified diffs, execution verdicts (PASS, WARN, BLOCK).
+
+2. Pre-Flight Transaction & Drainer Shield (`simulate_tx`)
+   - Endpoints: `POST /api/v1/preflight/simulate`, `POST /v2/preflight/simulate`
+   - Pricing: 0.05 USDC or 0.00035 SOL
+   - Preflight inspection for Base/Ethereum and Solana transactions. Detects honeypots, unlimited token approvals, known drainer contracts, and MEV sandwich traps.
+
+3. Anti-Bot Web Access & Scraper Oracle (`scrape_url`)
+   - Endpoints: `POST /api/v1/oracle/scrape`, `POST /v2/oracle/scrape`
+   - Pricing: 0.02 USDC or 0.00015 SOL
+   - Stealth browser headers, Cloudflare Turnstile/WAF bypass, HTML-to-clean-Markdown extraction saving ~90% LLM context tokens.
+
+4. Prepaid Session Micro-Vouchers
+   - Endpoint: `POST /api/v1/session/deposit`
+   - Pricing: 0.85 USDC or 0.006 SOL (10 credits valid across all tools with 0ms RPC bypass).
+   - Authenticated via `X-SCANPAY-SESSION` header.
+
+- GitHub: https://github.com/Misterio070/scanpay
+"""
+
+ROBOTS_TXT_CONTENT = """User-agent: *
+Allow: /
+Allow: /llms.txt
+Allow: /.well-known/
+Allow: /bazaar.json
+Allow: /api/v1/products
+Allow: /mcp
+Allow: /sse
+
+# Explicit Allow for Autonomous AI Crawlers
+User-agent: GPTBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: Anthropic-AI
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: Bytespider
+Allow: /
+
+Sitemap: https://scanpay-ob3w.onrender.com/sitemap.xml
+"""
+
+SITEMAP_XML_CONTENT = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://scanpay-ob3w.onrender.com/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>
+  <url><loc>https://scanpay-ob3w.onrender.com/llms.txt</loc><changefreq>daily</changefreq><priority>0.9</priority></url>
+  <url><loc>https://scanpay-ob3w.onrender.com/bazaar.json</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://scanpay-ob3w.onrender.com/.well-known/x402</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://scanpay-ob3w.onrender.com/.well-known/mcp.json</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://scanpay-ob3w.onrender.com/.well-known/agent-card.json</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://scanpay-ob3w.onrender.com/api/v1/products</loc><changefreq>daily</changefreq><priority>0.8</priority></url>
+  <url><loc>https://scanpay-ob3w.onrender.com/SKILL.md</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://scanpay-ob3w.onrender.com/PAY.md</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://scanpay-ob3w.onrender.com/docs</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>
+</urlset>
+"""
+
+
 @app.get("/llms.txt")
 async def llms_txt_route():
     llms_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "llms.txt")
@@ -970,10 +1056,47 @@ async def llms_txt_route():
         with open(llms_path, "r", encoding="utf-8") as f:
             content = f.read()
     else:
-        content = "# ScanPay"
+        content = LLMS_TXT_CONTENT
     return Response(
         content=content,
         media_type="text/plain",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+
+@app.get("/robots.txt")
+async def robots_txt_route():
+    return Response(
+        content=ROBOTS_TXT_CONTENT,
+        media_type="text/plain",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+
+@app.get("/sitemap.xml")
+async def sitemap_xml_route():
+    return Response(
+        content=SITEMAP_XML_CONTENT,
+        media_type="application/xml",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+
+@app.get("/.well-known/ai-plugin.json")
+async def ai_plugin_route():
+    return JSONResponse(
+        content={
+            "schema_version": "v1",
+            "name_for_model": "scanpay_security",
+            "name_for_human": "ScanPay Security Suite",
+            "description_for_model": "Scan code for vulnerabilities with AST analysis, simulate transactions before execution to block drainers/honeypots, and scrape protected web URLs bypassing WAFs. Supports x402 micropayments on Solana and Base.",
+            "description_for_human": "Autonomous code security, transaction simulation, and scraping oracle for AI agents.",
+            "auth": {"type": "none"},
+            "api": {"type": "openapi", "url": "https://scanpay-ob3w.onrender.com/openapi.json"},
+            "logo_url": "https://scanpay-ob3w.onrender.com/social-preview.svg",
+            "contact_email": "alextaghiashvili@gmail.com",
+            "legal_info_url": "https://github.com/Misterio070/scanpay"
+        },
         headers={"Access-Control-Allow-Origin": "*"}
     )
 
@@ -1099,29 +1222,117 @@ async def sse_endpoint(request: Request):
 @app.get("/")
 async def root():
     return HTMLResponse(f"""<!DOCTYPE html>
-<html><head><title>ScanPay</title></head><body>
-<h1>ScanPay</h1>
-<p>Paid deterministic code security scanner for AI agents with x402 v2 payment discovery and auto-remediation.</p>
-<ul>
-  <li><b>Engine:</b> {ENGINE_VERSION}</li>
-  <li><b>Payment mode:</b> {PAYMENT_MODE}</li>
-  <li><b>JS engine:</b> {'available' if JS_AVAILABLE else 'unavailable'}</li>
-  <li><b>x402 version:</b> {X402_VERSION}</li>
-  <li><b>Remote MCP:</b> <code>POST /mcp</code>, <code>GET /sse</code></li>
-</ul>
-<p>Discovery Endpoints:</p>
-<ul>
-  <li><code>GET /.well-known/x402</code></li>
-  <li><code>GET /bazaar.json</code></li>
-  <li><code>GET /.well-known/mcp.json</code></li>
-  <li><code>GET /.well-known/agent-card.json</code></li>
-  <li><code>GET /SKILL.md</code></li>
-  <li><code>GET /PAY.md</code></li>
-  <li><code>GET /api/v1/health</code></li>
-  <li><code>POST /api/v1/scan</code></li>
-  <li><code>POST /api/v1/session/deposit</code></li>
-</ul>
-</body></html>""")
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ScanPay v{ENGINE_VERSION} — Autonomous A2A Security Oracle</title>
+  <style>
+    :root {{
+      --bg: #090a0f;
+      --card-bg: #12151e;
+      --border: #23283a;
+      --primary: #00f2fe;
+      --secondary: #4facfe;
+      --text: #f0f3f8;
+      --text-muted: #8b949e;
+      --green: #10b981;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }}
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.6;
+      padding: 40px 20px;
+    }}
+    .container {{ max-width: 960px; margin: 0 auto; }}
+    header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 40px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }}
+    .logo {{ font-size: 26px; font-weight: 800; background: linear-gradient(135deg, var(--primary), var(--secondary)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }}
+    .badge {{ display: inline-flex; align-items: center; gap: 8px; background: rgba(16, 185, 129, 0.1); border: 1px solid var(--green); color: var(--green); padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; font-family: var(--font-mono); }}
+    .badge::before {{ content: ""; width: 8px; height: 8px; background: var(--green); border-radius: 50%; box-shadow: 0 0 10px var(--green); }}
+    h1 {{ font-size: 36px; font-weight: 800; line-height: 1.2; margin-bottom: 16px; letter-spacing: -0.02em; }}
+    p.lead {{ font-size: 18px; color: var(--text-muted); margin-bottom: 32px; }}
+    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 40px; }}
+    .card {{ background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }}
+    .card h3 {{ font-size: 18px; margin-bottom: 8px; }}
+    .card .price {{ font-family: var(--font-mono); font-size: 15px; color: var(--primary); margin-bottom: 12px; }}
+    .card p {{ font-size: 14px; color: var(--text-muted); }}
+    .section-title {{ font-size: 22px; font-weight: 700; margin-bottom: 16px; margin-top: 32px; }}
+    pre {{ background: #000; border: 1px solid var(--border); border-radius: 8px; padding: 16px; overflow-x: auto; font-family: var(--font-mono); font-size: 13px; color: #a5d6ff; margin-bottom: 24px; }}
+    .btn-group {{ display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }}
+    .btn {{ display: inline-block; background: var(--card-bg); border: 1px solid var(--border); color: var(--text); padding: 8px 16px; border-radius: 6px; text-decoration: none; font-size: 14px; transition: border-color 0.2s; }}
+    .btn:hover {{ border-color: var(--primary); }}
+    .btn.primary {{ background: linear-gradient(135deg, var(--secondary), var(--primary)); color: #000; font-weight: 600; border: none; }}
+    footer {{ margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); text-align: center; color: var(--text-muted); font-size: 13px; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo">⚡ ScanPay</div>
+      <div class="badge">● LIVE ({PAYMENT_MODE.upper()} v{ENGINE_VERSION})</div>
+    </header>
+
+    <h1>Autonomous Security Oracle for AI Agents</h1>
+    <p class="lead">Deterministic static AST code vulnerability scanner, pre-flight drainer shield, and anti-bot scraper oracle powered by x402 v2 micropayments on Solana & Base.</p>
+
+    <div class="grid">
+      <div class="card">
+        <h3>🔍 AST Code Scanner</h3>
+        <div class="price">0.0007 SOL / 0.10 Base USDC</div>
+        <p>Deterministic AST inspection for Python, JS/TS/TSX. Detects code injection, wallet exfiltration, SSRF, prototype pollution with automated unified diffs.</p>
+      </div>
+      <div class="card">
+        <h3>🛡️ Pre-Flight Drainer Shield</h3>
+        <div class="price">0.00035 SOL / 0.05 Base USDC</div>
+        <p>Simulates EVM (Base Flashblocks 200ms) and Solana transactions before broadcast. Detects honeypots, unlimited token approvals, and sandwich traps.</p>
+      </div>
+      <div class="card">
+        <h3>🌐 Anti-Bot Scraper Oracle</h3>
+        <div class="price">0.00015 SOL / 0.02 Base USDC</div>
+        <p>Stealth browser extraction bypassing Cloudflare Turnstile/WAF, returning token-optimized Markdown to cut LLM prompt context by ~90%.</p>
+      </div>
+      <div class="card">
+        <h3>🎟️ Prepaid Session Voucher</h3>
+        <div class="price">0.006 SOL / 0.85 Base USDC</div>
+        <p>Prepaid 10-credit batch valid across all tools with 0ms RPC confirmation bypass. 15% discount for high-throughput autonomous agent loops.</p>
+      </div>
+    </div>
+
+    <div class="section-title">Zero-Install Agent Integration (MCP)</div>
+    <pre><code>npx github:Misterio070/scanpay</code></pre>
+
+    <div class="section-title">Remote MCP SSE Configuration (Claude Desktop / Cursor)</div>
+    <pre><code>{{
+  "mcpServers": {{
+    "scanpay": {{
+      "url": "https://scanpay-ob3w.onrender.com/sse"
+    }}
+  }}
+}}</code></pre>
+
+    <div class="section-title">Machine Discovery & Protocols</div>
+    <div class="btn-group">
+      <a href="/llms.txt" class="btn primary">📄 llms.txt</a>
+      <a href="/docs" class="btn">⚡ OpenAPI Interactive Docs</a>
+      <a href="/.well-known/x402" class="btn">💳 x402 Manifest</a>
+      <a href="/bazaar.json" class="btn">🏪 Bazaar Manifest</a>
+      <a href="/.well-known/mcp.json" class="btn">🤖 MCP Manifest</a>
+      <a href="/.well-known/agent-card.json" class="btn">🪪 ERC-8004 Agent Card</a>
+      <a href="/api/v1/products" class="btn">📦 Live Products</a>
+      <a href="https://glama.ai/mcp/servers/Misterio070/scanpay" class="btn" target="_blank">⭐ Glama Index (Grade A)</a>
+      <a href="https://github.com/Misterio070/scanpay" class="btn" target="_blank">🐙 GitHub Repository</a>
+    </div>
+
+    <footer>
+      Settlement Wallets — Solana: <code style="font-family: var(--font-mono); color: var(--primary);">{MERCHANT_WALLET}</code> | Base EVM: <code style="font-family: var(--font-mono); color: var(--primary);">{MERCHANT_EVM_WALLET}</code><br>
+      ScanPay v{ENGINE_VERSION} • ERC-8004 / ERC-8183 Compliant
+    </footer>
+  </div>
+</body>
+</html>""")
 
 
 if __name__ == "__main__":

@@ -76,3 +76,35 @@ class TestDiscoveryEndpoints:
         assert "2020-12" in data["$schema"]
         assert "ScanPayA2AScanResponse" in data["title"]
         assert "execution_gate" in data["properties"]
+
+    def test_robots_txt(self, client):
+        r = client.get("/robots.txt")
+        assert r.status_code == 200
+        assert "GPTBot" in r.text
+        assert "Claude-Web" in r.text
+        assert "Sitemap:" in r.text
+
+    def test_sitemap_xml(self, client):
+        r = client.get("/sitemap.xml")
+        assert r.status_code == 200
+        assert "<loc>https://scanpay-ob3w.onrender.com/llms.txt</loc>" in r.text
+
+    def test_ai_plugin_json(self, client):
+        r = client.get("/.well-known/ai-plugin.json")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["name_for_model"] == "scanpay_security"
+        assert "openapi.json" in data["api"]["url"]
+
+    def test_llms_txt_rich_content(self, client):
+        r = client.get("/llms.txt")
+        assert r.status_code == 200
+        assert "ScanPay A2A Security Oracle" in r.text
+        assert "0.0007 SOL" in r.text
+        assert len(r.text) > 500
+
+    def test_root_landing_page(self, client):
+        r = client.get("/")
+        assert r.status_code == 200
+        assert "Autonomous Security Oracle" in r.text
+        assert "npx github:Misterio070/scanpay" in r.text
