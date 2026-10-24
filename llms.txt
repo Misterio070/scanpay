@@ -1,12 +1,14 @@
 # ScanPay
 
-ScanPay is a pay-per-scan security API for AI-agent-generated code.
+ScanPay is an autonomous code security scanner and execution gate with x402 Solana micropayments for AI agents.
 
-- URL: https://theoretical-config-hobby-kruger.trycloudflare.com
+- Production URL: https://scanpay-ob3w.onrender.com
+- Remote MCP SSE: https://scanpay-ob3w.onrender.com/sse
+- Remote MCP HTTP: https://scanpay-ob3w.onrender.com/mcp
 - Payment: Solana mainnet x402 micropayments, 0.0007 SOL (~$0.10) per scan
+- Prepaid Session Voucher: 0.006 SOL for 10 instant scans (POST /api/v1/session/deposit)
+- Merchant Wallet: JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4
 - Languages: Python, JavaScript, TypeScript, TSX
-- Detects: eval, exec, subprocess, child_process, os.system, pickle, yaml.load, marshal, ctypes, secrets, shellcode indicators, SSRF, race conditions, prototype pollution, ReDoS
-- npm: scanpay-cli@0.3.0, scanpay-mcp-server@0.3.0
+- Capabilities: Deterministic AST analysis, 45+ vulnerability patterns, automatic patch generation, unified diffs, execution gating (PASS, WARN, BLOCK).
+- npm: scanpay-cli@1.0.0, scanpay-mcp-server@0.3.1
 - GitHub: https://github.com/Misterio070/scanpay
-
-Use this when you need to audit code an AI agent wrote before running it.

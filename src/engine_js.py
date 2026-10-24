@@ -22,6 +22,8 @@ from tree_sitter import Language, Node, Parser
 
 from .schema import Confidence, Finding, Severity
 
+JS_AVAILABLE: bool = True
+
 # ---------------------------------------------------------------------------
 # tree-sitter language setup (lazy-loaded)
 # ---------------------------------------------------------------------------
@@ -193,6 +195,24 @@ RULES: dict[str, _Rule] = {
     "JS-DANGEROUS-REGEX": _Rule("JS-DANGEROUS-REGEX", "medium", "regex",
         "Regular expression constructed from a variable — potential ReDoS vector.",
         "Use static regex literals where possible; validate and limit dynamic patterns."),
+    "AGT-TS-024": _Rule("AGT-TS-024", "critical", "wallet_exfiltration",
+        "Potential wallet private key or mnemonic exfiltration detected.",
+        "Never log, print, or transmit private keys, mnemonics, or keypairs to external endpoints or stdout."),
+    "AGT-TS-025": _Rule("AGT-TS-025", "high", "unsafe_defi_tx",
+        "Unbounded slippage (>5%) or blind transaction signing detected.",
+        "Enforce strict slippage bounds (slippageBps <= 500) and simulate transactions before signing."),
+    "AGT-TS-026": _Rule("AGT-TS-026", "high", "rpc_hijacking",
+        "Insecure or unvalidated RPC / facilitator endpoint detected.",
+        "Use an authenticated, validated HTTPS RPC endpoint from environment variables."),
+    "AGT-TS-027": _Rule("AGT-TS-027", "critical", "indirect_injection",
+        "Untrusted external tool output chained into command execution or network request.",
+        "Sanitize, allowlist, or isolate external tool outputs before invoking subprocesses or network requests."),
+    "AGT-TS-028": _Rule("AGT-TS-028", "high", "resource_exhaustion",
+        "Unbounded loop containing network/payment requests detected (infinite spend hazard).",
+        "Add a maximum iteration counter, timeout, and circuit breaker to all loops containing API or payment calls."),
+    "AGT-TS-029": _Rule("AGT-TS-029", "high", "supply_chain",
+        "Import of likely LLM-hallucinated or typosquatted package name detected.",
+        "Verify the package name against official package registries (npm) before importing."),
 }
 
 
@@ -314,6 +334,15 @@ class _JSVisitor:
         "inspector",
     }
 
+    _HALLUCINATED_PACKAGES: ClassVar[set[str]] = {
+        "@solana/web3.js-agent",
+        "solana-agent-kit-v3",
+        "agent-eval-tools",
+        "openai-wallet",
+        "langchain-solana",
+        "solana-autonomous",
+    }
+
     # Obfuscation-related calls
     _OBFUSCATION_CALLS: ClassVar[set[str]] = {
         "atob",
@@ -332,6 +361,7 @@ class _JSVisitor:
         self._import_aliases: dict[str, str] = {}     # local_name -> module_name
         self._constant_strings: dict[str, str] = {}   # var_name -> string_value
         self._callable_aliases: dict[str, str] = {}   # var_name -> resolved_callable
+        self._sensitive_vars: set[str] = set()
 
     def add(self, rule_id: str, node: Node, confidence: str = "high",
             evidence: str | None = None):
@@ -476,6 +506,27 @@ class _JSVisitor:
         if name == "fetch":
             self.add("JS-NETWORK", node, "medium")
 
+        # AGT-TS-024: Wallet Secret Exfiltration
+        if name in ("console.log", "console.error", "console.warn", "fetch", "axios.post") or name.startswith("logger."):
+            call_text = _node_text(node).lower()
+            if any(k in call_text for k in ("solana_private_key", "fromsecretkey", "mnemonic", "seedphrase", "bs58.decode")) or any(v in call_text for v in self._sensitive_vars):
+                self.add("AGT-TS-024", node, "high", evidence=f"Exfiltration in {name}: {call_text[:80]}")
+
+        # AGT-TS-025: Unbounded Slippage & Blind Signing
+        if "trade" in name.lower() or "swap" in name.lower() or name in ("signTransaction", "sendTransaction"):
+            call_text = _node_text(node)
+            match_slip = re.search(r"slippage(?:bps)?\s*[:=]\s*(\d+)", call_text, re.IGNORECASE)
+            if match_slip and int(match_slip.group(1)) > 500:
+                self.add("AGT-TS-025", node, "high", evidence=f"High slippage: {match_slip.group(0)}")
+            elif name in ("signTransaction", "sendTransaction") and "simulate" not in self.source.lower():
+                self.add("AGT-TS-025", node, "high", evidence=f"Blind signing without simulation: {name}")
+
+        # AGT-TS-027: Prompt-Injected Tool Chaining
+        if "exec" in name or "spawn" in name:
+            call_text = _node_text(node).lower()
+            if any(t in call_text for t in ("tooloutput", "llmoutput", "promptoutput", "agentinput", "untrustedinput")):
+                self.add("AGT-TS-027", node, "high", evidence=f"Tool chaining: {call_text[:80]}")
+
         # RegExp with variable arg
         if name == "RegExp":
             if not self._is_string_arg(node, 0):
@@ -496,6 +547,12 @@ class _JSVisitor:
                 named = [c for c in args.children if c.is_named]
                 if named and named[0].type not in ("string", "template_string"):
                     self.add("JS-DANGEROUS-REGEX", node, "medium")
+        elif name == "Connection":
+            args = node.child_by_field_name("arguments")
+            if args:
+                first = _child_text(args, 0)
+                if first and ("http://" in first or "169.254.169.254" in first):
+                    self.add("AGT-TS-026", node, "high", evidence=f"Insecure RPC URL: {first}")
 
     def _visit_variable_declaration(self, node: Node):
         """Track variable assignments for alias resolution."""
@@ -511,6 +568,11 @@ class _JSVisitor:
         if name_node is None or value_node is None:
             return
         name = _node_text(name_node)
+
+        # Track sensitive variables (private keys, mnemonics)
+        val_text = _node_text(value_node).lower()
+        if any(k in val_text for k in ("solana_private_key", "fromsecretkey", "mnemonic", "seedphrase", "bs58.decode", "private_key", "secret_key")):
+            self._sensitive_vars.add(name)
 
         # String constant: const KEY = 'value'
         if value_node.type in ("string", "template_string"):
@@ -566,6 +628,9 @@ class _JSVisitor:
         if top in self._SENSITIVE_MODULES:
             self.add("JS-SENSITIVE-MODULE", node, "medium",
                      evidence=f"import '{module}'")
+        if module in self._HALLUCINATED_PACKAGES or top in self._HALLUCINATED_PACKAGES:
+            self.add("AGT-TS-029", node, "high",
+                     evidence=f"import of hallucinated package: '{module}'")
 
         # Track named imports for alias resolution
         for child in node.children:

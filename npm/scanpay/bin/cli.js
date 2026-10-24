@@ -5,7 +5,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-const DEFAULT_URL = 'https://repository-nil-camcorder-divx.trycloudflare.com';
+const DEFAULT_URL = process.env.SCANPAY_URL || 'https://scanpay-ob3w.onrender.com';
 const SCAN_ENDPOINT = '/api/v1/scan';
 const HEALTH_ENDPOINT = '/api/v1/health';
 const PRODUCTS_ENDPOINT = '/api/v1/products';

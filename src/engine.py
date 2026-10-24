@@ -115,6 +115,24 @@ RULES: dict[str, _Rule] = {
     "PY-PARSER-ABUSE": _Rule("PY-PARSER-ABUSE", "high", "parser_abuse",
         "Excessive nesting / parser-stress input detected.",
         "Simplify deeply nested structures; reject machine-generated abuse input."),
+    "AGT-PY-023": _Rule("AGT-PY-023", "critical", "wallet_exfiltration",
+        "Potential wallet private key or mnemonic exfiltration detected.",
+        "Never print, log, or transmit private keys, mnemonics, or seed phrases."),
+    "AGT-PY-024": _Rule("AGT-PY-024", "high", "rpc_hijacking",
+        "Insecure or unvalidated RPC / facilitator endpoint detected.",
+        "Use an authenticated, validated HTTPS RPC endpoint from environment variables."),
+    "AGT-PY-025": _Rule("AGT-PY-025", "critical", "indirect_injection",
+        "Untrusted external tool output chained directly into command execution or network request.",
+        "Sanitize, allowlist, or isolate external tool outputs before invoking subprocesses or network requests."),
+    "AGT-PY-026": _Rule("AGT-PY-026", "high", "resource_exhaustion",
+        "Unbounded loop containing network/payment requests detected (infinite spend hazard).",
+        "Add a maximum iteration counter, timeout, and circuit breaker to all loops containing API or payment calls."),
+    "AGT-PY-027": _Rule("AGT-PY-027", "high", "supply_chain",
+        "Import of likely LLM-hallucinated or typosquatted package name detected.",
+        "Verify the package name against official package registries (PyPI) before importing."),
+    "AGT-PY-028": _Rule("AGT-PY-028", "high", "unsafe_defi_tx",
+        "Unverified transaction broadcast detected without preceding simulation.",
+        "Simulate transactions (simulateTransaction) and verify destination/amount before signing."),
 }
 
 
@@ -162,6 +180,7 @@ class _Visitor(ast.NodeVisitor):
         self._constant_strings: dict[str, str] = {}
         self._dynamic_modules: dict[str, str] = {}
         self._callable_aliases: dict[str, str] = {}
+        self._sensitive_vars: set[str] = set()
 
     # functions that are dangerous even when imported bare via `from x import y`
     _FROM_SINKS: ClassVar[set[str]] = {
@@ -203,10 +222,24 @@ class _Visitor(ast.NodeVisitor):
         "mmap",
     }
 
+    _HALLUCINATED_MODULES: ClassVar[set[str]] = {
+        "solana_web3",
+        "solana_agent",
+        "langchain_solana",
+        "pysolana",
+        "openai_secret",
+        "agent_eval",
+        "solana_agent_kit",
+        "agentic_solana",
+        "solana_trade_bot",
+    }
+
     def _check_module(self, module: str, node: ast.AST):
         top = module.split(".")[0]
         if top in self._SENSITIVE_MODULES:
             self.add("PY-SENSITIVE-MODULE", node, "medium", evidence=f"import {module}")
+        if top in self._HALLUCINATED_MODULES:
+            self.add("AGT-PY-027", node, "high", evidence=f"import of hallucinated package: {module}")
 
     def _resolve_string(self, node: ast.AST) -> str | None:
         """Resolve only side-effect-free string literals, names, and addition."""
@@ -265,7 +298,10 @@ class _Visitor(ast.NodeVisitor):
     def visit_Assign(self, node: ast.Assign):
         names = [target.id for target in node.targets if isinstance(target, ast.Name)]
         value = self._resolve_string(node.value)
+        val_text = _evidence(self.source, node.value).lower()
         for name in names:
+            if any(k in val_text for k in ("solana_private_key", "private_key", "from_secret_key", "secret_key", "mnemonic", "seed_phrase", "bs58.decode")):
+                self._sensitive_vars.add(name)
             if value is not None:
                 self._constant_strings[name] = value
             else:
@@ -380,6 +416,46 @@ class _Visitor(ast.NodeVisitor):
             if isinstance(first, ast.Name) and first.id in ("__builtins__", "builtins"):
                 self.add("PY-SCANNER-BYPASS", node)
 
+        # AGT-PY-023: Wallet Secret & Mnemonic Exfiltration
+        if name in ("print", "logging.info", "logging.debug", "logging.error", "logger.info", "logger.debug") or name.startswith(("requests.", "httpx.", "urllib.")):
+            for arg in node.args:
+                arg_text = _evidence(self.source, arg).lower()
+                arg_names = [sub.id for sub in ast.walk(arg) if isinstance(sub, ast.Name)]
+                if any(k in arg_text for k in ("solana_private_key", "private_key", "secret_key", "keypair.from_secret_key", "seed_phrase", "mnemonic", "bs58.decode")) or any(n in self._sensitive_vars for n in arg_names):
+                    self.add("AGT-PY-023", node, "high", evidence=f"Exfiltration in {name}: {arg_text[:80]}")
+
+        # AGT-PY-024: Unauthorized RPC & Relay Hijacking
+        if name in ("Client", "AsyncClient", "Connection", "SolanaClient"):
+            if node.args:
+                url_val = self._resolve_string(node.args[0])
+                if url_val and (url_val.startswith("http://") or "169.254.169.254" in url_val):
+                    self.add("AGT-PY-024", node, "high", evidence=f"Insecure RPC URL: {url_val}")
+
+        # AGT-PY-025: Prompt-Injected Tool Chaining
+        if name in ("os.system", "subprocess.run", "subprocess.Popen") or name.startswith("subprocess."):
+            for arg in node.args:
+                arg_text = _evidence(self.source, arg).lower()
+                if any(t in arg_text for t in ("tool_output", "llm_output", "prompt_output", "agent_input", "untrusted_input")):
+                    self.add("AGT-PY-025", node, "high", evidence=f"Chaining untrusted input: {arg_text[:80]}")
+
+        # AGT-PY-028: Insecure Transaction Signing without Simulation
+        if name in ("send_transaction", "send_raw_transaction", "broadcast_transaction"):
+            if "simulate" not in self.source.lower():
+                self.add("AGT-PY-028", node, "high", evidence=f"Unsimulated transaction broadcast: {name}")
+
+        self.generic_visit(node)
+
+    def visit_While(self, node: ast.While):
+        # AGT-PY-026: Unbounded spend / infinite loops
+        is_infinite = (isinstance(node.test, ast.Constant) and bool(node.test.value))
+        if is_infinite:
+            has_break = any(isinstance(sub, ast.Break) for sub in ast.walk(node))
+            has_net = any(
+                isinstance(sub, ast.Call) and any(net in _func_name(sub).lower() for net in ("requests", "httpx", "fetch", "urlopen", "x402", "send_transaction", "swap"))
+                for sub in ast.walk(node)
+            )
+            if has_net and not has_break:
+                self.add("AGT-PY-026", node, "high", evidence="Infinite loop with network/payment calls and no break")
         self.generic_visit(node)
 
 

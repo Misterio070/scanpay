@@ -1,213 +1,117 @@
-# ScanPay — Code Security Scanner with x402 v2 Micropayments
+# ScanPay — Code Security Scanner & Guardrail Oracle for AI Agents
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Engine Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://scanpay-ob3w.onrender.com/api/v1/health)
+[![x402 Conformance](https://img.shields.io/badge/x402-v2_Compliant-green.svg)](https://scanpay-ob3w.onrender.com/.well-known/x402)
+[![Solana](https://img.shields.io/badge/Solana-Mainnet-purple.svg)](https://explorer.solana.com/address/JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4)
 
-## 🚀 Try ScanPay Live (Solana Mainnet)
+ScanPay is a deterministic AST-based code security scanner and execution gatekeeper designed specifically for the **Agent-to-Agent (A2A)** economy with x402 Solana micropayments.
 
-Pay 0.0007 SOL (~$0.10) per scan. No account. No API key.
+- **Production API:** `https://scanpay-ob3w.onrender.com`
+- **Remote Streamable MCP:** `https://scanpay-ob3w.onrender.com/mcp` (HTTP) / `https://scanpay-ob3w.onrender.com/sse` (SSE)
+- **Solana Merchant Wallet:** `JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4`
+- **Pricing:** `0.0007 SOL` (~$0.10) per single scan | `0.006 SOL` for 10 prepaid session scans
 
-- **Live API:** https://scanpay-ob3w.onrender.com
-- **Landing page:** https://misterio070.github.io/scanpay-landing/
-- **AgentBridge:** https://invest-ftp-cast-surround.trycloudflare.com
-- **MCP Server:** `npx scanpay-mcp-server`
-- **CLI:** `npx scanpay-cli scan --language python --file ./code.py`
-- **llms.txt:** https://github.com/Misterio070/scanpay/blob/main/llms.txt
+---
 
-## 💰 Pricing
+## 🎯 Machine Experience (MX) & A2A Capabilities
 
-- Python / JavaScript / TypeScript scan: **0.0007 SOL**
-- AgentBridge job escrow commission: **10%**
-- No subscriptions, no free trial abuse.
+Traditional security scanners output verbose human prose. ScanPay produces structured **Machine Responses**:
+1. **Execution Gate Verdict:** `PASS`, `WARN`, or `BLOCK` with explicit `allow_execution` boolean and 0-100 `risk_score`.
+2. **Deterministic Auto-Remediation:** Generates instant `remediated_code` and `unified_diff` patches (e.g. `eval` $\to$ `ast.literal_eval`, `shell=True` $\to$ `shell=False`, `innerHTML` $\to$ `textContent`).
+3. **Agent-Specific AST Rules:** Detects wallet private key theft, unauthorized Solana RPC routing, prompt-injected tool chaining, infinite x402 spend loops, and hallucinated packages.
+4. **Session Vouchers:** Prepaid micro-vouchers (`0.006 SOL` for 10 scans) delivering **sub-millisecond latency** with zero per-call gas fees and zero RPC polling.
 
-![npm version](https://img.shields.io/npm/v/scanpay-cli.svg)
-![npm downloads](https://img.shields.io/npm/dm/scanpay-cli.svg)
-![GitHub](https://img.shields.io/github/stars/Misterio070/scanpay.svg)
-![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+---
 
-> Deterministic AST-based security scanning for Python and JavaScript/TypeScript.
-> No code execution. No AI inference. Just fast, reliable vulnerability detection.
-> Pay per scan with Solana micropayments — $0.10/scan.
+## 🌐 Live Discovery Endpoints
 
-## 🎯 What It Does
+Autonomous agent frameworks discover ScanPay automatically via spec-compliant endpoints:
 
-ScanPay analyzes source code for security vulnerabilities using deterministic AST parsing. No AI, no code execution — just fast, reliable pattern matching that catches 45+ vulnerability classes before code runs.
+| Endpoint | Standard / Protocol | Purpose |
+| :--- | :--- | :--- |
+| `GET /.well-known/x402` | x402 v2 Spec | Protocol discovery, CAIP-2 network, pricing & endpoints |
+| `GET /bazaar.json` | Coinbase CDP / Onyx Bazaar | Registry catalog with `extensions.bazaar.discoverable: true` |
+| `GET /.well-known/mcp.json` | Model Context Protocol | Remote MCP manifest for Protogrid, Smithery, Glama |
+| `GET /.well-known/agent-card.json` | ERC-8004 / ERC-8183 | Agent identity card declaring Oracle capabilities |
+| `GET /SKILL.md` | Agent Skills | Native instructions for Claude Code, Hermes, and Codex |
+| `GET /PAY.md` | Solana Pay.sh | Settlement routes, recipient wallet, and spend caps |
+| `POST /mcp` & `GET /sse` | MCP Remote Transports | Stateless JSON-RPC tool invocation over HTTP & SSE |
 
-Built for **AI agents** that generate code: scan before execution, block dangerous patterns, log audit trails.
+---
 
-## ✨ Features
+## ⚡ Quick Start
 
-- **45+ vulnerability patterns** across Python and JS/TS/TSX
-- **Deterministic analysis** — same input always produces same output
-- **x402 v2 payment protocol** — pay per scan with SOL on Solana
-- **Dual language support** — Python (`ast` module) and JS/TS (tree-sitter)
-- **No false AI hallucinations** — pure rule-based detection
-- **FastAPI-powered** — sub-100ms scan latency
-- **SARIF output** — industry-standard vulnerability report format
-- **Batch scanning** — scan multiple files in one request
-
-## 🌐 Live Demo
-
-ScanPay is deployed and running:
-
-- **Public API:** `https://theoretical-config-hobby-kruger.trycloudflare.com`
-- **Products:** `https://theoretical-config-hobby-kruger.trycloudflare.com/api/v1/products`
-- **Payment:** x402 v2 on Solana mainnet (0.0007 SOL ≈ $0.10 per scan)
-- **Wallet:** `JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4`
-
-### Try it
-
+### 1. Per-Scan Micropayment (x402 v2)
 ```bash
-curl -X POST https://theoretical-config-hobby-kruger.trycloudflare.com/api/v1/scan \
+# 1. Probe scan endpoint (returns 402 Payment Required)
+curl -s -i -X POST https://scanpay-ob3w.onrender.com/api/v1/scan \
   -H "Content-Type: application/json" \
-  -d '{"language":"python","source_code":"import os; os.system(\"rm -rf /\")"}'
-```
+  -d '{"language":"python","source_code":"eval(user_input)"}'
 
-Returns `402 Payment Required` with Solana payment details. Send payment and retry with `X-PAYMENT` header to get the scan result.
-
-## 🚀 Quick Start
-
-### Using the Live API (mainnet)
-
-```bash
-# Health check
-curl https://repository-nil-camcorder-divx.trycloudflare.com/api/v1/health
-
-# List available products
-curl https://repository-nil-camcorder-divx.trycloudflare.com/api/v1/products
-
-# Scan code (requires payment)
-curl -X POST https://repository-nil-camcorder-divx.trycloudflare.com/api/v1/scan \
+# 2. Transfer 0.0007 SOL (700,000 lamports) to merchant wallet on Solana
+# 3. Retry with X-PAYMENT header containing transaction signature:
+curl -s -X POST https://scanpay-ob3w.onrender.com/api/v1/scan \
   -H "Content-Type: application/json" \
-  -d '{"source_code":"eval(userInput)","language":"python"}'
-# → 402 Payment Required (0.0007 SOL)
+  -H "X-PAYMENT: <tx_signature>" \
+  -d '{"language":"python","source_code":"eval(user_input)"}'
 ```
 
-### Self-Host
-
+### 2. High-Frequency Session Voucher (0ms Latency)
+Prepay 0.006 SOL for 10 instant scans:
 ```bash
-git clone https://github.com/Misterio070/scanpay.git
-cd scanpay
-pip install -r requirements.txt
-python main.py
-# → http://localhost:8484
+# 1. Deposit on-chain & activate voucher
+curl -s -X POST https://scanpay-ob3w.onrender.com/api/v1/session/deposit \
+  -H "Content-Type: application/json" \
+  -d '{"deposit_tx": "<tx_signature_for_0.006_SOL>"}'
+
+# 2. Pass session token on all subsequent scans
+curl -s -X POST https://scanpay-ob3w.onrender.com/api/v1/scan \
+  -H "Content-Type: application/json" \
+  -H "X-SCANPAY-SESSION: <session_token>" \
+  -d '{"language":"python","source_code":"import ast; ast.literal_eval(user_input)"}'
 ```
 
-## 💳 Payment Flow (x402 v2)
+---
 
-1. Client requests scan → receives `402 Payment Required`
-2. Client pays **0.0007 SOL** (~$0.10) to merchant wallet via Solana
-3. Client retries with `X-PAYMENT` header containing payment proof
-4. Server verifies payment on-chain, runs scan, returns results
+## 🤖 Remote Model Context Protocol (MCP)
 
-**Merchant wallet:** `JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4`
+ScanPay runs as a native remote streamable MCP server. No local Node.js or Python runtime required.
 
-## 🤖 For AI Agents (MCP Server)
-
-ScanPay includes an MCP server for AI agents to scan code before execution:
-
+### Add to Claude Desktop / Cursor / Windsurf
 ```json
 {
   "mcpServers": {
     "scanpay": {
-      "command": "npx",
-      "args": ["-y", "scanpay-cli", "scanpay-mcp"],
-      "env": { "SCANPAY_URL": "https://repository-nil-camcorder-divx.trycloudflare.com" }
+      "url": "https://scanpay-ob3w.onrender.com/sse"
     }
   }
 }
 ```
 
-Agents call `scan_code` to check code for vulnerabilities before running it.
-**Network:** Solana mainnet (mainnet coming soon)
+Or connect via stdio using `npx`:
+```bash
+npx scanpay-mcp-server
+```
 
-## 📋 Configuration
+---
+
+## 📦 Agent Framework Integrations
+
+- **Solana Agent Kit v2:** `packages/plugin-solana-agent-kit` (`@scanpay/plugin-solana-agent-kit`)
+- **ElizaOS:** `packages/plugin-elizaos` (`@elizaos/plugin-scanpay`)
+- **Universal Guardrail Hook:** `packages/scanpay-guardrail/scanpay-hook.py` (Claude Code `PreToolUse` hook, OpenCode, Codex, LangGraph)
+
+---
+
+## 🧪 Testing & Verification
 
 ```bash
-cp .env.example .env
+# Run 104+ unit and integration tests
+python3 -m pytest
 ```
 
-| Env Var | Default | Description |
-|---------|---------|-------------|
-| `SCANPAY_PAYMENT_MODE` | `disabled` | `disabled`, `mainnet`, or `mainnet` |
-| `SCANPAY_MERCHANT_WALLET` | — | Solana wallet address |
-| `SCANPAY_PRICE_LAMPORTS` | `700000` | Price in lamports (0.0007 SOL) |
-| `SCANPAY_RPC_URL` | `https://api.devnet.solana.com` | Solana RPC endpoint |
-| `SCANPAY_PORT` | `8484` | Server port |
-
-## 🧪 Detected Vulnerabilities
-
-### Python
-- `eval()` / `exec()` — code injection
-- `subprocess` with `shell=True` — command injection
-- `pickle.loads()` — deserialization attacks
-- `os.system()` — command injection
-- SQL injection patterns
-- Path traversal (`../`)
-- Hardcoded credentials
-- And more...
-
-### JavaScript/TypeScript
-- `eval()` — code injection
-- `innerHTML` — XSS
-- `document.write()` — XSS
-- `new Function()` — code injection
-- SQL injection patterns
-- Prototype pollution
-- And more...
-
-## 📊 API Reference
-
-### `GET /api/v1/health`
-Returns service status and configuration.
-
-### `GET /api/v1/products`
-Returns available scan products and pricing.
-
-### `POST /api/v1/scan`
-Scans source code for vulnerabilities. Requires payment in mainnet/mainnet mode.
-
-**Request:**
-```json
-{
-  "source_code": "eval(userInput)",
-  "language": "python"
-}
-```
-
-**Response (200):**
-```json
-{
-  "status": "ok",
-  "findings": [
-    {
-      "rule": "PY001",
-      "severity": "critical",
-      "message": "Use of eval() detected — code injection risk",
-      "line": 1
-    }
-  ],
-  "summary": {
-    "total": 1,
-    "critical": 1,
-    "high": 0,
-    "medium": 0,
-    "low": 0
-  }
-}
-```
-
-## 🤝 Built For
-
-- **AI Agents** — scan generated code before execution
-- **CI/CD Pipelines** — pre-deployment security gate
-- **IDE Extensions** — real-time vulnerability detection
-- **Code Review** — automated security audit
+---
 
 ## 📄 License
-
-MIT
-
-## 🔗 Links
-
-- [GitHub](https://github.com/Misterio070/scanpay)
-- [x402 Protocol](https://x402.org)
-- [Solana](https://solana.com)
+MIT © Alex Taghiashvili

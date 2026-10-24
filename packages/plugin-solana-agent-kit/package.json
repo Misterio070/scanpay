@@ -1,0 +1,28 @@
+{
+  "name": "@scanpay/plugin-solana-agent-kit",
+  "version": "1.0.0",
+  "description": "ScanPay security scanner and execution gate plugin for Solana Agent Kit v2 with x402 micropayments",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "keywords": [
+    "solana",
+    "solana-agent-kit",
+    "scanpay",
+    "x402",
+    "security",
+    "code-scanner",
+    "ai-agents",
+    "ast-analysis"
+  ],
+  "author": "alextaghiashvili",
+  "license": "MIT",
+  "peerDependencies": {
+    "solana-agent-kit": "^1.4.0 || ^2.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}

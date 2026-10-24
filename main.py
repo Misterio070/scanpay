@@ -1,56 +1,78 @@
 """ScanPay — Paid code security scanner with x402 v2 payment discovery.
 
 POST /api/v1/scan        — scan code (x402 payment required, disabled by default)
+POST /v2/scan            — alias for A2A v2 scan endpoint
+POST /api/v1/session/deposit — prepay 0.006 SOL for 10 instant scans
 GET  /api/v1/products    — list available products
 GET  /api/v1/health      — health check
-GET  /api/v1/verify-payment/{tx_sig} — verify a Solana payment (testnet only)
+GET  /api/v1/verify-payment/{tx_sig} — verify a Solana payment
+GET  /.well-known/x402   — x402 v2 discovery manifest
+GET  /bazaar.json        — Coinbase CDP Bazaar / Onyx Bazaar metadata
+GET  /.well-known/mcp.json — MCP registry manifest
+GET  /.well-known/agent-card.json — ERC-8004 A2A card
+GET  /SKILL.md           — Agent Skill markdown
+GET  /PAY.md             — Payment specification
+POST /mcp                — Streamable HTTP MCP JSON-RPC
+GET  /sse                — Streamable SSE MCP endpoint
 
 x402 v2 payment flow:
 1. Client requests a scan without payment → 402 with WWW-Authenticate: x402
-   and a JSON body describing payment requirements (chain, token, amount,
-   recipient, payment-proxy URL).
-2. Client pays via the x402 payment proxy and receives a payment proof.
-3. Client retries with X-PAYMENT header containing the base64-encoded proof.
-4. Server verifies the proof, runs the scan, returns results.
-
-Payment modes (env SCANPAY_PAYMENT_MODE):
-  disabled  — default; 402 returned with instructions, no verification (safe demo)
-  testnet   — Solana devnet verification (no real value)
-  mainnet   — Solana mainnet verification (OWNER-ONLY GATE, never default)
-
-Revenue, if ever enabled, goes to the owner's SOL wallet (env-configured).
+   and a JSON body describing payment requirements.
+2. Client pays via Solana transfer and receives a tx signature or uses a session voucher.
+3. Client retries with X-PAYMENT or X-SCANPAY-SESSION header.
+4. Server verifies the proof/voucher, runs the scan, returns MX v2 results.
 """
 from __future__ import annotations
 
-import os
-from dotenv import load_dotenv
-load_dotenv()
-import time
+import asyncio
+import base64
+from contextlib import asynccontextmanager
 import hashlib
 import json
-import sqlite3
-import base64
 import logging
-from typing import Optional, Literal
-from contextlib import asynccontextmanager
+import os
+import sqlite3
+import sys
+import time
+from typing import Any, Literal, Optional
+
+from dotenv import load_dotenv
+load_dotenv()
 
 import httpx
 from fastapi import FastAPI, HTTPException, Header, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel, Field
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-# --- Scanner engines ---------------------------------------------------------
-import sys
+# --- Local Modules -----------------------------------------------------------
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from src.engine import scan as scan_python, RULES as PY_RULES, sha256_hex
+from src.discovery import (
+    CANONICAL_URL,
+    PAY_MD,
+    SKILL_MD,
+    get_agent_card,
+    get_bazaar_manifest,
+    get_well_known_mcp,
+    get_well_known_x402,
+)
+from src.engine import RULES as PY_RULES, scan as scan_python, sha256_hex
+from src.mcp_remote import handle_mcp_jsonrpc
+from src.remediator import build_a2a_response
+from src.session import (
+    SESSION_BATCH_PRICE_LAMPORTS,
+    consume_session_credit,
+    create_session_voucher,
+    init_session_table,
+)
 
 try:
-    from src.engine_js import scan as scan_javascript
+    from src.engine_js import RULES as JS_RULES, scan as scan_javascript
     JS_AVAILABLE = True
 except Exception:
     JS_AVAILABLE = False
+    JS_RULES = []
 
 # --- Logging -----------------------------------------------------------------
 logging.basicConfig(
@@ -59,48 +81,34 @@ logging.basicConfig(
 )
 logger = logging.getLogger("scanpay")
 
-# --- Config (fail-closed defaults) -------------------------------------------
-
+# --- Config ------------------------------------------------------------------
 PaymentMode = Literal["disabled", "testnet", "mainnet"]
 
 PAYMENT_MODE: PaymentMode = os.getenv("SCANPAY_PAYMENT_MODE", "disabled")
 
-# RPC endpoints per mode
 _RPC_ENDPOINTS = {
-    "disabled": "https://api.devnet.solana.com",  # never called, but valid URL
+    "disabled": "https://api.devnet.solana.com",
     "testnet": "https://api.devnet.solana.com",
     "mainnet": "https://api.mainnet-beta.solana.com",
 }
 SOLANA_RPC = os.getenv("SCANPAY_RPC_URL", os.getenv("SOLANA_RPC", _RPC_ENDPOINTS[PAYMENT_MODE]))
 
-# Merchant wallet — env-driven, empty by default (fail-closed)
-MERCHANT_WALLET = os.getenv("SCANPAY_MERCHANT_WALLET", "")
+MERCHANT_WALLET = os.getenv("SCANPAY_MERCHANT_WALLET", "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4")
 
-# Price in lamports (0.01 SOL = 10_000_000 lamports)
-PRICE_LAMPORTS = int(os.getenv("SCANPAY_PRICE_LAMPORTS", "10000000"))
+PRICE_LAMPORTS = int(os.getenv("SCANPAY_PRICE_LAMPORTS", "700000"))
 PRICE_SOL = PRICE_LAMPORTS / 1_000_000_000
 
-# Payment window: 10 minutes
 PAYMENT_TIMEOUT_S = 600
-
-# Free trial is OFF by contract. This is non-negotiable.
 FREE_TRIAL_ENABLED = False
-
-# x402 version
 X402_VERSION = 2
 
-# Payment proxy URL (env-configured, for x402 discovery)
 PAYMENT_PROXY_URL = os.getenv("SCANPAY_PAYMENT_PROXY_URL", "")
 
-# Database path — keep on E: drive
 DB_PATH = os.getenv("SCANPAY_DB_PATH",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "scanpay.db"))
 
-# Allow CORS from env (comma-separated), default localhost only
-CORS_ORIGINS = [o.strip() for o in os.getenv("SCANPAY_CORS_ORIGINS",
-    "http://localhost:8484,http://127.0.0.1:8484").split(",") if o.strip()]
-
 ENGINE_VERSION = "1.1.0"
+
 
 # --- Database ----------------------------------------------------------------
 
@@ -127,8 +135,10 @@ def init_db():
             created_at REAL NOT NULL
         )
     """)
+    init_session_table(conn)
     conn.commit()
     conn.close()
+
 
 def check_payment(tx_sig: str) -> bool:
     conn = sqlite3.connect(DB_PATH)
@@ -139,13 +149,12 @@ def check_payment(tx_sig: str) -> bool:
     if row is None:
         return False
     used, network = row
-    # In disabled mode, no payment is ever valid
     if PAYMENT_MODE == "disabled":
         return False
-    # In testnet mode, only testnet payments are valid
     if PAYMENT_MODE == "testnet" and network != "testnet":
         return False
     return used == 0
+
 
 def store_payment(tx_sig: str, payer: str, lamports: int, network: str):
     conn = sqlite3.connect(DB_PATH)
@@ -157,10 +166,8 @@ def store_payment(tx_sig: str, payer: str, lamports: int, network: str):
     conn.commit()
     conn.close()
 
+
 def mark_payment_used(tx_sig: str) -> bool:
-    """Atomically mark a payment as used. Returns True if the payment was
-    successfully claimed (was unused), False if it was already used or doesn't
-    exist. This prevents TOCTOU race conditions under concurrent requests."""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.execute(
         "UPDATE payments SET used = 1 WHERE tx_signature = ? AND used = 0",
@@ -170,6 +177,7 @@ def mark_payment_used(tx_sig: str) -> bool:
     affected = cur.rowcount
     conn.close()
     return affected > 0
+
 
 def record_scan(tx_sig: str, language: str, source_hash: str, findings_count: int, max_sev: str):
     conn = sqlite3.connect(DB_PATH)
@@ -181,29 +189,41 @@ def record_scan(tx_sig: str, language: str, source_hash: str, findings_count: in
     conn.commit()
     conn.close()
 
+
 # --- x402 v2 payment requirements ---------------------------------------------
 
 def build_x402_requirements() -> dict:
-    """Build x402 v2 payment requirements for the 402 response."""
     reqs = {
         "x402Version": X402_VERSION,
         "scheme": "solana",
-        "network": "solana-" + PAYMENT_MODE if PAYMENT_MODE != "disabled" else "solana-devnet",
+        "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" if PAYMENT_MODE == "mainnet" else ("solana-" + PAYMENT_MODE if PAYMENT_MODE != "disabled" else "solana-devnet"),
         "amount": PRICE_LAMPORTS,
         "amount_display": f"{PRICE_SOL} SOL",
         "asset": "SOL",
-        "recipient": MERCHANT_WALLET,
+        "recipient": MERCHANT_WALLET or "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4",
         "description": "ScanPay: code security scan",
         "mimeType": "application/json",
         "maxTimeoutSeconds": PAYMENT_TIMEOUT_S,
+        "extensions": {
+            "bazaar": {
+                "discoverable": True,
+                "category": "security",
+                "tags": ["code-security", "ast-scanner", "a2a-guardrail", "solana-x402"]
+            },
+            "session_voucher": {
+                "supported": True,
+                "deposit_endpoint": f"{CANONICAL_URL}/api/v1/session/deposit",
+                "batch_price_lamports": SESSION_BATCH_PRICE_LAMPORTS,
+                "credits": 10
+            }
+        },
         "accepts": [
             {
                 "scheme": "solana",
-                "network": "solana-" + ("devnet" if PAYMENT_MODE == "testnet" else
-                                        "mainnet-beta" if PAYMENT_MODE == "mainnet" else "devnet"),
+                "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" if PAYMENT_MODE == "mainnet" else ("solana-" + ("devnet" if PAYMENT_MODE == "testnet" else "devnet")),
                 "asset": "SOL",
                 "amount": PRICE_LAMPORTS,
-                "recipient": MERCHANT_WALLET or "<set SCANPAY_MERCHANT_WALLET>",
+                "recipient": MERCHANT_WALLET or "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4",
             }
         ],
     }
@@ -211,31 +231,28 @@ def build_x402_requirements() -> dict:
         reqs["paymentProxyUrl"] = PAYMENT_PROXY_URL
     return reqs
 
+
 def x402_response(message: str = "Payment required") -> JSONResponse:
-    """Return a proper x402 v2 402 response."""
+    reqs = build_x402_requirements()
     return JSONResponse(
         status_code=402,
         content={
             "error": "payment_required",
             "message": message,
             "x402Version": X402_VERSION,
-            "paymentRequirements": build_x402_requirements(),
+            "paymentRequirements": reqs,
         },
         headers={
-            "WWW-Authenticate": f"x402",
-            "X-PAYMENT-REQUIREMENTS": json.dumps(build_x402_requirements()),
+            "WWW-Authenticate": "x402",
+            "X-PAYMENT-REQUIREMENTS": json.dumps(reqs),
+            "Access-Control-Allow-Origin": "*",
         }
     )
 
-# --- Solana payment verification (testnet/mainnet only) -----------------------
 
-async def verify_solana_tx(tx_sig: str) -> dict:
-    """Verify a Solana transaction on-chain via RPC.
+# --- Solana payment verification ---------------------------------------------
 
-    Only called in testnet or mainnet mode. In disabled mode, this is never
-    invoked — the 402 response simply tells the client how to pay, but no
-    proof is ever accepted.
-    """
+async def verify_solana_tx(tx_sig: str, min_lamports: int = PRICE_LAMPORTS) -> dict:
     if PAYMENT_MODE == "disabled":
         raise ValueError("Payment verification disabled (PAYMENT_MODE=disabled)")
     if not MERCHANT_WALLET:
@@ -265,7 +282,7 @@ async def verify_solana_tx(tx_sig: str) -> dict:
                 info = parsed.get("info", {})
                 dest = info.get("destination", "")
                 lamports = int(info.get("lamports", 0))
-                if dest == MERCHANT_WALLET and lamports >= PRICE_LAMPORTS:
+                if dest == MERCHANT_WALLET and lamports >= min_lamports:
                     return {
                         "valid": True,
                         "payer": info.get("source", ""),
@@ -273,16 +290,29 @@ async def verify_solana_tx(tx_sig: str) -> dict:
                         "network": network,
                         "slot": tx.get("slot"),
                     }
-        raise ValueError(f"No valid transfer to {MERCHANT_WALLET} of >= {PRICE_LAMPORTS} lamports")
+        raise ValueError(f"No valid transfer to {MERCHANT_WALLET} of >= {min_lamports} lamports")
+
 
 # --- Models ------------------------------------------------------------------
 
 class ScanRequest(BaseModel):
-    source_code: str = Field(..., min_length=1, max_length=102400)
+    source_code: Optional[str] = Field(default=None, max_length=102400)
+    code: Optional[str] = Field(default=None, max_length=102400)
     language: str = Field(default="python", pattern="^(python|javascript|typescript|tsx)$")
-    tx_signature: Optional[str] = None  # Solana tx signature as payment proof
+    tx_signature: Optional[str] = None
+    auto_remediate: bool = True
+
+    @model_validator(mode="after")
+    def validate_code_presence(self):
+        src = self.source_code if self.source_code is not None else self.code
+        if src is None or len(src) == 0:
+            raise ValueError("Either 'source_code' or 'code' must be non-empty")
+        return self
+
 
 class ScanResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     language: str
     source_sha256: str
     syntax_ok: bool
@@ -294,6 +324,12 @@ class ScanResponse(BaseModel):
     payment_mode: str
     charged: bool
 
+
+class SessionDepositRequest(BaseModel):
+    deposit_tx: str = Field(..., min_length=10)
+    payer_wallet: Optional[str] = None
+
+
 class ProductInfo(BaseModel):
     id: str
     name: str
@@ -302,7 +338,8 @@ class ProductInfo(BaseModel):
     description: str
     available: bool
 
-# --- App ---------------------------------------------------------------------
+
+# --- App Lifespan ------------------------------------------------------------
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -311,21 +348,23 @@ async def lifespan(app: FastAPI):
                 f"js_engine={JS_AVAILABLE}, db={DB_PATH}")
     yield
 
+
 app = FastAPI(
     title="ScanPay",
-    description="Paid code security scanner. x402 v2 payment discovery.",
+    description="Paid deterministic code security scanner. x402 v2 payment discovery, remote MCP, and session vouchers.",
     version=ENGINE_VERSION,
     lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
-    allow_methods=["GET", "POST"],
+    allow_origins=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
-# --- Routes ------------------------------------------------------------------
+
+# --- Core Routes -------------------------------------------------------------
 
 @app.get("/api/v1/health")
 async def health():
@@ -340,6 +379,7 @@ async def health():
         "free_trial_enabled": FREE_TRIAL_ENABLED,
     }
 
+
 @app.get("/api/v1/products")
 async def products():
     prods = [
@@ -348,8 +388,8 @@ async def products():
             name="Python Security Scan",
             price_sol=PRICE_SOL,
             price_usd_approx=round(PRICE_SOL * 150, 2),
-            description="Deterministic static analysis of Python code. Detects eval, exec, "
-                        "os.system, pickle.loads, hardcoded secrets, and 30+ vulnerability patterns.",
+            description="Deterministic static AST analysis of Python code. Detects eval, exec, "
+                        "os.system, pickle, secrets, wallet exfiltration, SSRF, and 28 vulnerability patterns.",
             available=PAYMENT_MODE != "disabled",
         ),
     ]
@@ -360,61 +400,90 @@ async def products():
             price_sol=PRICE_SOL,
             price_usd_approx=round(PRICE_SOL * 150, 2),
             description="Tree-sitter AST analysis of JS/TS/TSX code. Detects eval, Function(), "
-                        "child_process, prototype pollution, ReDoS, and 23 vulnerability patterns.",
+                        "child_process, prototype pollution, ReDoS, wallet exfiltration, and 29 vulnerability patterns.",
             available=PAYMENT_MODE != "disabled",
         ))
     return prods
 
+
 @app.post("/api/v1/scan")
+@app.post("/v2/scan")
 async def scan_code(
     req: ScanRequest,
     request: Request,
     x_payment: Optional[str] = Header(None, alias="X-PAYMENT"),
+    payment_signature: Optional[str] = Header(None, alias="PAYMENT-SIGNATURE"),
+    x_scanpay_session: Optional[str] = Header(None, alias="X-SCANPAY-SESSION"),
+    x_payment_session: Optional[str] = Header(None, alias="X-PAYMENT-SESSION"),
 ):
-    # --- Payment gate (x402 v2) ---
-    payment_proof = x_payment or req.tx_signature
+    # 1. Session Voucher check (0ms RPC bypass)
+    session_token = x_scanpay_session or x_payment_session
+    payment_is_session = False
+    payment_proof = None
 
-    if not payment_proof:
-        # No payment proof → return x402 v2 402
-        return x402_response(
-            f"Payment required. Send {PRICE_SOL} SOL to "
-            f"{MERCHANT_WALLET or '<set SCANPAY_MERCHANT_WALLET>'} "
-            f"and retry with X-PAYMENT header."
-        )
+    if session_token:
+        claimed, remaining, msg = consume_session_credit(DB_PATH, session_token)
+        if not claimed:
+            raise HTTPException(status_code=402, detail=f"Session voucher invalid: {msg}")
+        payment_proof = session_token
+        payment_is_session = True
 
-    # Payment proof provided — verify it
-    if PAYMENT_MODE == "disabled":
-        # In disabled mode, no proof is ever accepted
-        return x402_response(
-            "Payment verification disabled. Set SCANPAY_PAYMENT_MODE=testnet "
-            "or mainnet to accept payments."
-        )
+    # 2. Single-scan payment proof check
+    if not payment_is_session:
+        payment_proof = x_payment or payment_signature or req.tx_signature
 
-    # Check if already verified and unused
-    if not check_payment(payment_proof):
-        try:
-            result = await verify_solana_tx(payment_proof)
-            store_payment(payment_proof, result["payer"],
-                         result["amount_lamports"], result["network"])
-        except ValueError as e:
-            raise HTTPException(status_code=402, detail=f"Payment verification failed: {e}")
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"RPC error: {e}")
+        # Handle potential base64-encoded x402 v2 payment payload
+        if payment_proof and len(payment_proof) > 100:
+            try:
+                decoded = base64.b64decode(payment_proof).decode("utf-8")
+                parsed_json = json.loads(decoded)
+                payment_proof = parsed_json.get("tx_signature") or parsed_json.get("signature") or payment_proof
+            except Exception:
+                pass
 
-    # Replay prevention: reject if payment was already used
-    if not check_payment(payment_proof):
-        raise HTTPException(status_code=402, detail="Payment proof already used. Each scan requires a new payment.")
+        if not payment_proof:
+            return x402_response(
+                f"Payment required. Send {PRICE_SOL} SOL to "
+                f"{MERCHANT_WALLET or '<set SCANPAY_MERCHANT_WALLET>'} "
+                f"and retry with X-PAYMENT or X-SCANPAY-SESSION header."
+            )
 
-    # --- Run scan ---
-    source = req.source_code
+        if PAYMENT_MODE == "disabled":
+            return x402_response(
+                "Payment verification disabled. Set SCANPAY_PAYMENT_MODE=testnet "
+                "or mainnet to accept payments."
+            )
+
+        if not check_payment(payment_proof):
+            try:
+                result = await verify_solana_tx(payment_proof)
+                store_payment(payment_proof, result["payer"],
+                              result["amount_lamports"], result["network"])
+            except ValueError as e:
+                raise HTTPException(status_code=402, detail=f"Payment verification failed: {e}")
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"RPC error: {e}")
+
+        if not check_payment(payment_proof):
+            raise HTTPException(status_code=402, detail="Payment proof already used. Each scan requires a new payment.")
+
+        if not mark_payment_used(payment_proof):
+            raise HTTPException(status_code=402, detail="Payment proof already used. Each scan requires a new payment.")
+
+    # --- Run AST Scan ---
+    source = req.source_code if req.source_code is not None else req.code
     source_hash = sha256_hex(source)
 
     if req.language == "python":
         r = scan_python(source)
         findings = [f.model_dump() for f in r.findings]
+        findings_objs = r.findings
+        rules_cnt = len(PY_RULES)
     elif req.language in ("javascript", "typescript", "tsx") and JS_AVAILABLE:
         r = scan_javascript(source, language=req.language)
         findings = [f.model_dump() for f in r.findings]
+        findings_objs = r.findings
+        rules_cnt = len(JS_RULES)
     elif req.language in ("javascript", "typescript", "tsx") and not JS_AVAILABLE:
         raise HTTPException(status_code=503, detail="JS engine not available (tree-sitter not installed)")
     else:
@@ -428,29 +497,89 @@ async def scan_code(
         if max_sev is None or sev_order.get(sev, 0) > sev_order.get(max_sev, 0):
             max_sev = sev
 
-    # Atomically claim the payment — prevents TOCTOU race under concurrent requests
-    if not mark_payment_used(payment_proof):
-        raise HTTPException(status_code=402, detail="Payment proof already used. Each scan requires a new payment.")
+    # Record scan in database
+    record_scan(payment_proof or "session", req.language, source_hash, len(findings), max_sev or "none")
 
-    # Record scan
-    record_scan(payment_proof, req.language, source_hash, len(findings), max_sev or "none")
-
-    return ScanResponse(
+    # Build A2A MX v2 Response
+    a2a_dict = build_a2a_response(
+        source=source,
         language=req.language,
-        source_sha256=source_hash,
-        syntax_ok=r.syntax_ok,
-        findings=findings,
-        findings_count=len(findings),
-        max_severity=max_sev,
-        scan_duration_ms=r.scan_duration_ms,
-        engine_version=ENGINE_VERSION,
-        payment_mode=PAYMENT_MODE,
-        charged=PAYMENT_MODE != "disabled",
+        findings=findings_objs,
+        execution_time_ms=r.scan_duration_ms,
+        rules_evaluated=rules_cnt,
+        merchant_wallet=MERCHANT_WALLET,
+        payment_receipt=payment_proof,
     )
+
+    verdict = a2a_dict.get("execution_gate", {}).get("verdict", "WARN")
+
+    response_payload = {
+        "language": req.language,
+        "source_sha256": source_hash,
+        "syntax_ok": r.syntax_ok,
+        "findings": findings,
+        "findings_count": len(findings),
+        "max_severity": max_sev,
+        "scan_duration_ms": r.scan_duration_ms,
+        "engine_version": ENGINE_VERSION,
+        "payment_mode": PAYMENT_MODE,
+        "charged": PAYMENT_MODE != "disabled",
+        **a2a_dict,
+    }
+
+    receipt_header = base64.b64encode(json.dumps({
+        "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        "receipt": payment_proof,
+        "status": "settled",
+        "verdict": verdict,
+    }).encode("utf-8")).decode("utf-8")
+
+    return JSONResponse(
+        content=response_payload,
+        headers={
+            "X-SCANPAY-VERDICT": verdict,
+            "PAYMENT-RESPONSE": receipt_header,
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
+
+
+@app.post("/api/v1/session/deposit")
+@app.post("/v2/session/deposit")
+async def session_deposit(req: SessionDepositRequest):
+    if PAYMENT_MODE == "disabled":
+        return x402_response("Session deposits disabled in disabled mode.")
+
+    try:
+        res = await verify_solana_tx(req.deposit_tx, min_lamports=SESSION_BATCH_PRICE_LAMPORTS)
+        payer = req.payer_wallet or res.get("payer", "unknown_agent")
+    except ValueError as e:
+        raise HTTPException(status_code=402, detail=f"Deposit verification failed: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"RPC error: {e}")
+
+    voucher = create_session_voucher(
+        db_path=DB_PATH,
+        deposit_tx=req.deposit_tx,
+        payer=payer,
+        credits=10,
+    )
+
+    return JSONResponse(
+        content={
+            "status": "active",
+            "message": "Prepaid session voucher activated. 10 instant scans available.",
+            **voucher,
+        },
+        headers={
+            "X-SCANPAY-SESSION": voucher["session_token"],
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
+
 
 @app.get("/api/v1/verify-payment/{tx_sig}")
 async def verify_payment(tx_sig: str):
-    """Verify a Solana payment transaction (testnet/mainnet only)."""
     if PAYMENT_MODE == "disabled":
         return {"valid": False, "error": "Payment verification disabled"}
     try:
@@ -461,27 +590,163 @@ async def verify_payment(tx_sig: str):
     except Exception as e:
         return {"valid": False, "error": f"RPC error: {e}"}
 
+
+# --- Discovery Endpoints -----------------------------------------------------
+
+@app.get("/.well-known/x402")
+async def well_known_x402():
+    return JSONResponse(
+        content=get_well_known_x402(MERCHANT_WALLET, PRICE_LAMPORTS),
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+
+@app.get("/bazaar.json")
+async def bazaar_route():
+    return JSONResponse(
+        content=get_bazaar_manifest(MERCHANT_WALLET),
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+
+@app.get("/.well-known/mcp.json")
+async def well_known_mcp():
+    return JSONResponse(
+        content=get_well_known_mcp(),
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+
+@app.get("/.well-known/agent-card.json")
+async def well_known_agent_card():
+    return JSONResponse(
+        content=get_agent_card(),
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+
+@app.get("/SKILL.md")
+async def skill_route():
+    return Response(
+        content=SKILL_MD,
+        media_type="text/markdown",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+
+@app.get("/PAY.md")
+async def pay_route():
+    return Response(
+        content=PAY_MD,
+        media_type="text/markdown",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+
+@app.get("/llms.txt")
+async def llms_txt_route():
+    llms_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "llms.txt")
+    if os.path.exists(llms_path):
+        with open(llms_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    else:
+        content = "# ScanPay"
+    return Response(
+        content=content,
+        media_type="text/plain",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+
+# --- Remote MCP Endpoints ----------------------------------------------------
+
+@app.post("/mcp")
+async def mcp_post(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
+            headers={"Access-Control-Allow-Origin": "*"}
+        )
+    result = handle_mcp_jsonrpc(
+        request_data=body,
+        merchant_wallet=MERCHANT_WALLET,
+        payment_mode=PAYMENT_MODE,
+        db_path=DB_PATH,
+    )
+    return JSONResponse(content=result, headers={"Access-Control-Allow-Origin": "*"})
+
+
+@app.get("/mcp")
+async def mcp_get():
+    return JSONResponse(
+        content={
+            "name": "ScanPay MCP Server",
+            "version": ENGINE_VERSION,
+            "status": "ready",
+            "transports": ["http", "sse"],
+            "endpoints": {
+                "http": f"{CANONICAL_URL}/mcp",
+                "sse": f"{CANONICAL_URL}/sse",
+            },
+        },
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+
+@app.get("/sse")
+async def sse_endpoint(request: Request):
+    async def event_generator():
+        yield "event: endpoint\ndata: /mcp\n\n"
+        while True:
+            if await request.is_disconnected():
+                break
+            await asyncio.sleep(15)
+            yield ": ping\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
+
+
+# --- Root Landing ------------------------------------------------------------
+
 @app.get("/")
 async def root():
-    """Landing page with service info."""
     return HTMLResponse(f"""<!DOCTYPE html>
 <html><head><title>ScanPay</title></head><body>
 <h1>ScanPay</h1>
-<p>Paid code security scanner with x402 v2 payment discovery.</p>
+<p>Paid deterministic code security scanner for AI agents with x402 v2 payment discovery and auto-remediation.</p>
 <ul>
   <li><b>Engine:</b> {ENGINE_VERSION}</li>
   <li><b>Payment mode:</b> {PAYMENT_MODE}</li>
   <li><b>JS engine:</b> {'available' if JS_AVAILABLE else 'unavailable'}</li>
   <li><b>x402 version:</b> {X402_VERSION}</li>
+  <li><b>Remote MCP:</b> <code>POST /mcp</code>, <code>GET /sse</code></li>
 </ul>
-<p>Endpoints:</p>
+<p>Discovery Endpoints:</p>
 <ul>
+  <li><code>GET /.well-known/x402</code></li>
+  <li><code>GET /bazaar.json</code></li>
+  <li><code>GET /.well-known/mcp.json</code></li>
+  <li><code>GET /.well-known/agent-card.json</code></li>
+  <li><code>GET /SKILL.md</code></li>
+  <li><code>GET /PAY.md</code></li>
   <li><code>GET /api/v1/health</code></li>
-  <li><code>GET /api/v1/products</code></li>
-  <li><code>POST /api/v1/scan</code> (payment required)</li>
-  <li><code>GET /api/v1/verify-payment/{{tx_sig}}</code></li>
+  <li><code>POST /api/v1/scan</code></li>
+  <li><code>POST /api/v1/session/deposit</code></li>
 </ul>
 </body></html>""")
+
 
 if __name__ == "__main__":
     import uvicorn

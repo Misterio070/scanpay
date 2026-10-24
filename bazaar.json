@@ -1,34 +1,50 @@
 {
   "name": "ScanPay",
-  "description": "Deterministic code security scanner with x402 v2 payment discovery. Scans Python and JavaScript/TypeScript source for 45 vulnerability patterns using AST analysis — no code execution, no AI inference.",
+  "description": "Deterministic AST code security scanner with x402 Solana micropayments and instant auto-remediation for AI agents.",
   "version": "1.1.0",
   "engine_version": "1.1.0",
+  "homepage": "https://github.com/Misterio070/scanpay",
   "payment": {
     "protocol": "x402",
     "version": 2,
     "scheme": "solana",
-    "network": "solana-mainnet",
+    "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
     "asset": "SOL",
     "price_lamports": 700000,
     "price_display": "0.0007 SOL",
     "price_usd_approx": 0.10,
-    "mode": "mainnet",
     "recipient": "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4",
     "free_trial": false
+  },
+  "extensions": {
+    "bazaar": {
+      "discoverable": true,
+      "category": "security",
+      "service_type": "security-oracle",
+      "tags": [
+        "security",
+        "ast-scanner",
+        "code-auditor",
+        "solana",
+        "x402",
+        "ai-agents",
+        "auto-remediation"
+      ]
+    }
   },
   "products": [
     {
       "id": "python-scan",
       "name": "Python Security Scan",
       "language": "python",
-      "rules_count": 22,
+      "rules_count": 28,
       "available": true
     },
     {
       "id": "js-scan",
       "name": "JavaScript/TypeScript Security Scan",
       "languages": ["javascript", "typescript", "tsx"],
-      "rules_count": 23,
+      "rules_count": 29,
       "available": true
     }
   ],
@@ -38,45 +54,23 @@
     "deterministic": true,
     "executes_code": false,
     "uses_ai": false,
+    "auto_remediation": true,
     "scanner": "AST (Python: ast module, JS/TS: tree-sitter)"
   },
   "endpoints": {
     "health": "GET /api/v1/health",
     "products": "GET /api/v1/products",
     "scan": "POST /api/v1/scan (x402 payment required)",
-    "verify_payment": "GET /api/v1/verify-payment/{tx_signature}"
-  },
-  "deployment": {
-    "local": "bash start.sh [port]",
-    "docker": "docker-compose up",
-    "tunnel": "cloudflared tunnel run --config cloudflared.yml scanpay"
-  },
-  "test_status": {
-    "total_tests": 75,
-    "passing": 75,
-    "skipped": 0,
-    "failed": 0
+    "scan_v2": "POST /v2/scan",
+    "session_deposit": "POST /api/v1/session/deposit",
+    "verify_payment": "GET /api/v1/verify-payment/{tx_signature}",
+    "mcp": "POST /mcp",
+    "sse": "GET /sse"
   },
   "public_endpoint": {
     "url": "https://scanpay-ob3w.onrender.com",
-    "type": "cloudflare-quick-tunnel",
     "verified": true,
     "health_ok": true,
-    "products_available": true,
-    "payment_mode": "testnet",
-    "note": "Quick Tunnel — temporary URL. Stable named tunnel requires Cloudflare account login (owner-only gate)."
-  },
-  "revenue": {
-    "verified_usd": 0,
-    "verified_sol": 0,
-    "note": "Zero verified revenue. Payment path activated on testnet. Awaiting first real settlement."
-  },
-  "truthfulness": {
-    "payment_disabled": false,
-    "payment_testnet": true,
-    "products_available": true,
-    "free_trial_enabled": false,
-    "revenue_claimed": false,
-    "mainnet_active": false
+    "products_available": true
   }
 }

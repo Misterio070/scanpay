@@ -1,0 +1,27 @@
+{
+  "name": "@elizaos/plugin-scanpay",
+  "version": "1.0.0",
+  "description": "ElizaOS security oracle and code guardrail plugin for autonomous AI agents",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "keywords": [
+    "elizaos",
+    "eliza",
+    "scanpay",
+    "security",
+    "guardrail",
+    "x402",
+    "ai-agents"
+  ],
+  "author": "alextaghiashvili",
+  "license": "MIT",
+  "peerDependencies": {
+    "@elizaos/core": ">=0.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}
