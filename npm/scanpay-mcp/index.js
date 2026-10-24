@@ -10,7 +10,7 @@ const http = require('http');
 const https = require('https');
 const readline = require('readline');
 
-const DEFAULT_URL = process.env.SCANPAY_URL || 'http://localhost:8484';
+const DEFAULT_URL = process.env.SCANPAY_URL || 'https://scanpay-ob3w.onrender.com';
 
 function getHttpClient(targetUrl) {
   return targetUrl.protocol === 'https:' ? https : http;

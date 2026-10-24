@@ -18,7 +18,7 @@ Add to `claude_desktop_config.json`:
     "scanpay": {
       "command": "scanpay-mcp",
       "env": {
-        "SCANPAY_URL": "https://repository-nil-camcorder-divx.trycloudflare.com"
+        "SCANPAY_URL": "https://scanpay-ob3w.onrender.com"
       }
     }
   }

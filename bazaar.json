@@ -58,7 +58,7 @@
     "failed": 0
   },
   "public_endpoint": {
-    "url": "https://repository-nil-camcorder-divx.trycloudflare.com",
+    "url": "https://scanpay-ob3w.onrender.com",
     "type": "cloudflare-quick-tunnel",
     "verified": true,
     "health_ok": true,

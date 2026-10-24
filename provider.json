@@ -1,8 +1,8 @@
 {
   "name": "scanpay",
   "description": "Code security scanner with x402 v2 micropayments. Scan Python/JS/TS for 45+ vulnerability patterns using deterministic AST analysis. No AI, no code execution — just fast, reliable pattern matching.",
-  "version": "0.2.0",
-  "url": "https://repository-nil-camcorder-divx.trycloudflare.com",
+  "version": "0.3.0",
+  "url": "https://scanpay-ob3w.onrender.com",
   "payment": {
     "scheme": "solana",
     "network": "solana-mainnet",
@@ -30,7 +30,7 @@
     "command": "npx",
     "args": ["-y", "scanpay-cli", "scanpay-mcp"],
     "env": {
-      "SCANPAY_URL": "https://repository-nil-camcorder-divx.trycloudflare.com"
+      "SCANPAY_URL": "https://scanpay-ob3w.onrender.com"
     }
   },
   "endpoints": {

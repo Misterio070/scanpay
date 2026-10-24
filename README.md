@@ -5,7 +5,7 @@
 
 Pay 0.0007 SOL (~$0.10) per scan. No account. No API key.
 
-- **Live API:** https://theoretical-config-hobby-kruger.trycloudflare.com
+- **Live API:** https://scanpay-ob3w.onrender.com
 - **Landing page:** https://misterio070.github.io/scanpay-landing/
 - **AgentBridge:** https://invest-ftp-cast-surround.trycloudflare.com
 - **MCP Server:** `npx scanpay-mcp-server`
