@@ -1,0 +1,17 @@
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      scanpayUrl:
+        type: string
+        default: "https://scanpay-ob3w.onrender.com"
+        description: "The ScanPay API backend URL"
+  commandFunction: |-
+    (config) => ({
+      command: 'npx',
+      args: ['-y', 'scanpay-mcp-server'],
+      env: {
+        SCANPAY_URL: config?.scanpayUrl || 'https://scanpay-ob3w.onrender.com'
+      }
+    })
