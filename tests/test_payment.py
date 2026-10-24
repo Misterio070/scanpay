@@ -144,6 +144,28 @@ class TestPaymentAmountBinding:
             assert "verification failed" in r.json()["detail"].lower()
 
 
+class TestUSDCPayment:
+    def test_usdc_payment_accepted(self, testnet_client):
+        fake_tx = "usdc_transfer_tx_001"
+        mock_result = {
+            "valid": True,
+            "payer": "FakeUSDCPayer1111111111111111111111111111111",
+            "amount_lamports": 100000,
+            "asset": "USDC",
+            "network": "testnet",
+            "slot": 12345,
+        }
+        with patch("main.verify_solana_tx", new_callable=AsyncMock, return_value=mock_result):
+            r = testnet_client.post("/api/v1/scan", json={
+                "source_code": "x = 1",
+                "language": "python",
+            }, headers={"X-PAYMENT": fake_tx})
+            assert r.status_code == 200
+            data = r.json()
+            assert data["charged"] is True
+            assert data["execution_gate"]["verdict"] == "PASS"
+
+
 class TestPaymentRecipientBinding:
     """Payments must go to the configured merchant wallet."""
 

@@ -30,10 +30,32 @@ def get_well_known_x402(merchant: str = MERCHANT_WALLET, price_lamports: int = S
         "pricing": {
             "single_scan_lamports": price_lamports,
             "single_scan_sol": price_lamports / 1_000_000_000,
+            "single_scan_usdc": 0.10,
             "session_10_scans_lamports": SESSION_10_LAMPORTS,
             "session_10_scans_sol": SESSION_10_LAMPORTS / 1_000_000_000,
+            "session_10_scans_usdc": 0.85,
             "discount_percentage": 15,
         },
+        "supported_assets": ["SOL", "USDC"],
+        "accepts": [
+            {
+                "scheme": "solana",
+                "network": SOLANA_CAIP2,
+                "asset": "SOL",
+                "amount": price_lamports,
+                "amountDisplay": f"{price_lamports / 1_000_000_000:.4f} SOL",
+                "recipient": merchant,
+            },
+            {
+                "scheme": "solana",
+                "network": SOLANA_CAIP2,
+                "asset": "USDC",
+                "amount": 100000,
+                "amountDisplay": "0.10 USDC",
+                "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "recipient": merchant,
+            },
+        ],
         "endpoints": {
             "scan": f"{CANONICAL_URL}/api/v1/scan",
             "scan_v2": f"{CANONICAL_URL}/v2/scan",

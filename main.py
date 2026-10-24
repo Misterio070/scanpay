@@ -224,8 +224,18 @@ def build_x402_requirements() -> dict:
                 "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" if PAYMENT_MODE == "mainnet" else ("solana-" + ("devnet" if PAYMENT_MODE == "testnet" else "devnet")),
                 "asset": "SOL",
                 "amount": PRICE_LAMPORTS,
+                "amount_display": f"{PRICE_SOL} SOL",
                 "recipient": MERCHANT_WALLET or "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4",
-            }
+            },
+            {
+                "scheme": "solana",
+                "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" if PAYMENT_MODE == "mainnet" else ("solana-" + ("devnet" if PAYMENT_MODE == "testnet" else "devnet")),
+                "asset": "USDC",
+                "amount": 100000,
+                "amount_display": "0.10 USDC",
+                "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "recipient": MERCHANT_WALLET or "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4",
+            },
         ],
     }
     if PAYMENT_PROXY_URL:
@@ -279,8 +289,11 @@ async def verify_solana_tx(tx_sig: str, min_lamports: int = PRICE_LAMPORTS) -> d
         instructions = tx.get("transaction", {}).get("message", {}).get("instructions", [])
         for inst in instructions:
             parsed = inst.get("parsed", {})
-            if parsed.get("type") == "transfer":
-                info = parsed.get("info", {})
+            itype = parsed.get("type")
+            info = parsed.get("info", {})
+
+            # 1. Native SOL transfer
+            if itype == "transfer" and "lamports" in info:
                 dest = info.get("destination", "")
                 lamports = int(info.get("lamports", 0))
                 if dest == MERCHANT_WALLET and lamports >= min_lamports:
@@ -288,10 +301,26 @@ async def verify_solana_tx(tx_sig: str, min_lamports: int = PRICE_LAMPORTS) -> d
                         "valid": True,
                         "payer": info.get("source", ""),
                         "amount_lamports": lamports,
+                        "asset": "SOL",
                         "network": network,
                         "slot": tx.get("slot"),
                     }
-        raise ValueError(f"No valid transfer to {MERCHANT_WALLET} of >= {min_lamports} lamports")
+
+            # 2. SPL Token transfer (USDC: 100,000 micro-USDC = 0.10 USDC)
+            if itype in ("transfer", "transferChecked"):
+                amount_str = info.get("amount") or (info.get("tokenAmount", {}).get("amount"))
+                if amount_str:
+                    amt = int(amount_str)
+                    if amt >= 100000:
+                        return {
+                            "valid": True,
+                            "payer": info.get("source", "") or info.get("authority", ""),
+                            "amount_lamports": amt,
+                            "asset": "USDC",
+                            "network": network,
+                            "slot": tx.get("slot"),
+                        }
+        raise ValueError(f"No valid transfer to {MERCHANT_WALLET} of >= {min_lamports} lamports or >= 0.10 USDC")
 
 
 # --- Models ------------------------------------------------------------------
