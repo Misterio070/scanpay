@@ -9,6 +9,8 @@ services:
         value: mainnet
       - key: SCANPAY_MERCHANT_WALLET
         value: JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4
+      - key: SCANPAY_MERCHANT_EVM_WALLET
+        value: "0xb295E606F38C363b476FC546c27226B5fBcAAEFA"
       - key: SCANPAY_PRICE_LAMPORTS
         value: "700000"
       - key: SCANPAY_RPC_URL
