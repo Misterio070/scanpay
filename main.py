@@ -42,6 +42,7 @@ load_dotenv()
 import httpx
 from fastapi import FastAPI, HTTPException, Header, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -93,9 +94,9 @@ _RPC_ENDPOINTS = {
 }
 SOLANA_RPC = os.getenv("SCANPAY_RPC_URL", os.getenv("SOLANA_RPC", _RPC_ENDPOINTS[PAYMENT_MODE]))
 
-MERCHANT_WALLET = os.getenv("SCANPAY_MERCHANT_WALLET", "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4")
+MERCHANT_WALLET = (os.getenv("SCANPAY_MERCHANT_WALLET") or "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4").strip()
 
-PRICE_LAMPORTS = int(os.getenv("SCANPAY_PRICE_LAMPORTS", "700000"))
+PRICE_LAMPORTS = int(os.getenv("SCANPAY_PRICE_LAMPORTS") or "700000")
 PRICE_SOL = PRICE_LAMPORTS / 1_000_000_000
 
 PAYMENT_TIMEOUT_S = 600
@@ -443,8 +444,7 @@ async def scan_code(
 
         if not payment_proof:
             return x402_response(
-                f"Payment required. Send {PRICE_SOL} SOL to "
-                f"{MERCHANT_WALLET or '<set SCANPAY_MERCHANT_WALLET>'} "
+                f"Payment required. Send {PRICE_SOL} SOL to {MERCHANT_WALLET} "
                 f"and retry with X-PAYMENT or X-SCANPAY-SESSION header."
             )
 
@@ -656,6 +656,62 @@ async def llms_txt_route():
         media_type="text/plain",
         headers={"Access-Control-Allow-Origin": "*"}
     )
+
+
+@app.get("/schemas/v2/scan-response.schema.json")
+async def scan_response_schema():
+    schema_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schemas", "v2", "scan-response.schema.json")
+    if os.path.exists(schema_path):
+        with open(schema_path, "r", encoding="utf-8") as f:
+            return JSONResponse(content=json.load(f), headers={"Access-Control-Allow-Origin": "*"})
+    raise HTTPException(status_code=404, detail="Schema not found")
+
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title="ScanPay A2A Security Oracle",
+        version=ENGINE_VERSION,
+        description="Deterministic AST code security scanner with x402 Solana micropayments, remote MCP, and ERC-8183 Evaluator oracle.",
+        routes=app.routes,
+    )
+    openapi_schema["info"]["x-payment-protocol"] = "x402"
+    openapi_schema["info"]["x-payment-version"] = 2
+    openapi_schema["info"]["x-chain"] = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+    openapi_schema["info"]["x-merchant-wallet"] = MERCHANT_WALLET
+    openapi_schema["info"]["x-price-lamports"] = PRICE_LAMPORTS
+    openapi_schema["info"]["x-price-sol"] = PRICE_SOL
+    openapi_schema["info"]["x-bazaar-discoverable"] = True
+
+    paths = openapi_schema.get("paths", {})
+    for path in ["/api/v1/scan", "/v2/scan"]:
+        if path in paths and "post" in paths[path]:
+            paths[path]["post"]["x-upgrade-meta"] = {
+                "protocol": "x402",
+                "version": 2,
+                "chain": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+                "recipient": MERCHANT_WALLET,
+                "amount": PRICE_LAMPORTS
+            }
+            if "responses" in paths[path]["post"]:
+                paths[path]["post"]["responses"]["402"] = {
+                    "description": "Payment Required — x402 v2 challenge",
+                    "headers": {
+                        "WWW-Authenticate": {
+                            "description": "x402",
+                            "schema": {"type": "string", "example": "x402"}
+                        },
+                        "X-PAYMENT-REQUIREMENTS": {
+                            "description": "JSON payment requirement specification",
+                            "schema": {"type": "string"}
+                        }
+                    }
+                }
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
 
 
 # --- Remote MCP Endpoints ----------------------------------------------------

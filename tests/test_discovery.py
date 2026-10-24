@@ -54,3 +54,25 @@ class TestDiscoveryEndpoints:
         assert r.status_code == 200
         assert "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4" in r.text
         assert "700,000 lamports" in r.text
+
+    def test_openapi_x402_extensions(self, client):
+        r = client.get("/openapi.json")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["info"]["x-payment-protocol"] == "x402"
+        assert "x-merchant-wallet" in data["info"]
+        assert data["info"]["x-bazaar-discoverable"] is True
+        paths = data["paths"]
+        assert "/api/v1/scan" in paths
+        scan_post = paths["/api/v1/scan"]["post"]
+        assert "x-upgrade-meta" in scan_post
+        assert scan_post["x-upgrade-meta"]["protocol"] == "x402"
+
+    def test_scan_response_schema_json(self, client):
+        r = client.get("/schemas/v2/scan-response.schema.json")
+        assert r.status_code == 200
+        data = r.json()
+        assert "$schema" in data
+        assert "2020-12" in data["$schema"]
+        assert "ScanPayA2AScanResponse" in data["title"]
+        assert "execution_gate" in data["properties"]

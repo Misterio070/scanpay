@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scanpay-ob3w.onrender.com/schemas/v2/scan-response.schema.json",
+  "title": "ScanPayA2AScanResponse",
+  "description": "Machine-to-Machine deterministic AST security scan response with automated code patches and cryptographic receipt.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "scan_id",
+    "timestamp",
+    "engine_metrics",
+    "execution_gate",
+    "source_integrity",
+    "findings",
+    "auto_remediation",
+    "attestation"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "2.0.0"
+    },
+    "scan_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "engine_metrics": {
+      "type": "object",
+      "required": ["language", "parser", "rules_evaluated", "execution_time_ms", "deterministic"],
+      "properties": {
+        "language": { "type": "string", "enum": ["python", "javascript", "typescript", "tsx"] },
+        "parser": { "type": "string" },
+        "rules_evaluated": { "type": "integer", "minimum": 1 },
+        "execution_time_ms": { "type": "number", "minimum": 0 },
+        "deterministic": { "type": "boolean", "const": true }
+      }
+    },
+    "execution_gate": {
+      "type": "object",
+      "required": ["verdict", "allow_execution", "risk_score", "max_severity", "estimated_exploit_loss_usd"],
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": ["PASS", "WARN", "BLOCK"],
+          "description": "Deterministic directive for the calling agent's pre-execution hook."
+        },
+        "allow_execution": { "type": "boolean" },
+        "risk_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "max_severity": { "type": "string", "enum": ["NONE", "LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+        "estimated_exploit_loss_usd": {
+          "type": "number",
+          "description": "Expected financial loss if unpatched code is executed by an agent holding a funded wallet."
+        }
+      }
+    },
+    "source_integrity": {
+      "type": "object",
+      "required": ["original_sha256", "byte_length", "line_count"],
+      "properties": {
+        "original_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "byte_length": { "type": "integer" },
+        "line_count": { "type": "integer" }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "auto_remediation": {
+      "type": "object",
+      "required": ["patches_available", "remediated_code", "unified_diff", "post_patch_verdict"],
+      "properties": {
+        "patches_available": { "type": "boolean" },
+        "remediated_code": { "type": ["string", "null"] },
+        "unified_diff": { "type": "string" },
+        "post_patch_verdict": { "type": "string", "enum": ["PASS", "WARN", "BLOCK"] }
+      }
+    },
+    "attestation": {
+      "type": "object",
+      "required": ["oracle_pubkey", "oracle_signature", "timestamp", "payment_receipt"],
+      "properties": {
+        "oracle_pubkey": { "type": "string" },
+        "oracle_signature": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "payment_receipt": { "type": "string" }
+      }
+    }
+  }
+}
