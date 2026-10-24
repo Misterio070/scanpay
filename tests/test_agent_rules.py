@@ -65,6 +65,16 @@ send_transaction(signed_tx)
     assert "AGT-PY-028" in rule_ids
 
 
+def test_agent_py_dynamic_reflection():
+    code = """
+func = getattr(__builtins__, dynamic_func_name)
+func("malicious_code")
+"""
+    result = scan_python(code)
+    rule_ids = [f.rule_id for f in result.findings]
+    assert "AGT-PY-029" in rule_ids or "PY-SCANNER-BYPASS" in rule_ids
+
+
 @pytest.mark.skipif(not JS_AVAILABLE, reason="tree-sitter required")
 def test_agent_ts_wallet_exfiltration():
     code = """

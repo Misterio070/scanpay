@@ -133,6 +133,9 @@ RULES: dict[str, _Rule] = {
     "AGT-PY-028": _Rule("AGT-PY-028", "high", "unsafe_defi_tx",
         "Unverified transaction broadcast detected without preceding simulation.",
         "Simulate transactions (simulateTransaction) and verify destination/amount before signing."),
+    "AGT-PY-029": _Rule("AGT-PY-029", "high", "obfuscation",
+        "Non-constant dynamic reflection or builtins subscript lookup detected.",
+        "Use explicit static function calls rather than dynamic getattr/globals lookup to avoid security evasion."),
 }
 
 
@@ -416,6 +419,12 @@ class _Visitor(ast.NodeVisitor):
             if isinstance(first, ast.Name) and first.id in ("__builtins__", "builtins"):
                 self.add("PY-SCANNER-BYPASS", node)
 
+        # AGT-PY-029: Non-constant dynamic reflection via getattr
+        if base == "getattr" and len(node.args) >= 2:
+            second = node.args[1]
+            if not isinstance(second, ast.Constant):
+                self.add("AGT-PY-029", node, "high", evidence="Non-constant dynamic reflection in getattr()")
+
         # AGT-PY-023: Wallet Secret & Mnemonic Exfiltration
         if name in ("print", "logging.info", "logging.debug", "logging.error", "logger.info", "logger.debug") or name.startswith(("requests.", "httpx.", "urllib.")):
             for arg in node.args:
@@ -456,6 +465,14 @@ class _Visitor(ast.NodeVisitor):
             )
             if has_net and not has_break:
                 self.add("AGT-PY-026", node, "high", evidence="Infinite loop with network/payment calls and no break")
+        self.generic_visit(node)
+
+    def visit_Subscript(self, node: ast.Subscript):
+        # AGT-PY-029: Dynamic Reflection via globals()/locals() or builtins lookup
+        if isinstance(node.value, ast.Call) and _func_name(node.value) in ("globals", "locals"):
+            self.add("AGT-PY-029", node, "high", evidence="Dynamic reflection via globals()/locals() subscript lookup")
+        elif isinstance(node.value, ast.Name) and node.value.id in ("__builtins__", "builtins"):
+            self.add("AGT-PY-029", node, "high", evidence="Dynamic reflection via builtins subscript lookup")
         self.generic_visit(node)
 
 

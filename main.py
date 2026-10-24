@@ -282,6 +282,8 @@ def build_x402_requirements(service: str = "scan") -> dict:
 
 def x402_response(message: str = "Payment required", service: str = "scan") -> JSONResponse:
     reqs = build_x402_requirements(service=service)
+    reqs_json = json.dumps(reqs)
+    reqs_b64 = base64.b64encode(reqs_json.encode("utf-8")).decode("utf-8")
     return JSONResponse(
         status_code=402,
         content={
@@ -292,8 +294,10 @@ def x402_response(message: str = "Payment required", service: str = "scan") -> J
         },
         headers={
             "WWW-Authenticate": "x402",
-            "X-PAYMENT-REQUIREMENTS": json.dumps(reqs),
+            "PAYMENT-REQUIRED": reqs_b64,
+            "X-PAYMENT-REQUIREMENTS": reqs_json,
             "Access-Control-Allow-Origin": "*",
+            "Access-Control-Expose-Headers": "PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-PAYMENT-REQUIREMENTS, WWW-Authenticate",
         }
     )
 
@@ -794,11 +798,20 @@ async def preflight_simulate(
     verdict = res.get("execution_gate", {}).get("verdict", "WARN")
     status_header = "ALLOWED" if verdict == "ALLOW" else ("WARNED" if verdict == "WARN" else "BLOCKED")
 
+    receipt_header = base64.b64encode(json.dumps({
+        "success": True,
+        "receipt": payment_proof or "session",
+        "service": "preflight",
+        "timestamp": time.time(),
+    }).encode("utf-8")).decode("utf-8")
+
     return JSONResponse(
         content=res,
         headers={
             "X-SCANPAY-SIMULATION-VERDICT": status_header,
+            "PAYMENT-RESPONSE": receipt_header,
             "Access-Control-Allow-Origin": "*",
+            "Access-Control-Expose-Headers": "PAYMENT-RESPONSE, X-SCANPAY-SIMULATION-VERDICT",
         }
     )
 
@@ -867,11 +880,20 @@ async def oracle_scrape(
         payment_receipt=payment_proof,
     )
 
+    receipt_header = base64.b64encode(json.dumps({
+        "success": True,
+        "receipt": payment_proof or "session",
+        "service": "scrape",
+        "timestamp": time.time(),
+    }).encode("utf-8")).decode("utf-8")
+
     return JSONResponse(
         content=res,
         headers={
             "X-SCANPAY-WAF-DETECTED": str(res["bot_protection"]["waf_detected"]).lower(),
+            "PAYMENT-RESPONSE": receipt_header,
             "Access-Control-Allow-Origin": "*",
+            "Access-Control-Expose-Headers": "PAYMENT-RESPONSE, X-SCANPAY-WAF-DETECTED",
         }
     )
 

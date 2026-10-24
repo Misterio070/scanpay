@@ -126,3 +126,29 @@ def test_clean_transaction_allowed():
     assert res["execution_gate"]["allow_broadcast"] is True
     assert res["execution_gate"]["risk_score"] == 0
     assert len(res["findings"]) == 0
+
+
+def test_evm_address_poisoning_detected():
+    # Poisoned Base USDC vanity address
+    poisoned_addr = "0x8335000000000000000000000000000000002913"
+    tx = {
+        "to": poisoned_addr,
+        "data": "0x",
+        "value": 1000000000000000,
+    }
+    res = simulate_transaction("base", tx)
+    assert res["execution_gate"]["verdict"] == "BLOCK"
+    assert res["execution_gate"]["allow_broadcast"] is False
+    assert any(f["rule_id"] == "PRE-EVM-007" for f in res["findings"])
+
+
+def test_evm_multicall3_nested_approval_detected():
+    nested_calldata = "0xac9650d8" + "00" * 32 + "095ea7b3" + "f" * 64
+    tx = {
+        "to": "0xca11bde05977b3631167028862be2a173976ca11",
+        "data": nested_calldata,
+    }
+    res = simulate_transaction("base", tx)
+    assert res["execution_gate"]["verdict"] == "BLOCK"
+    assert res["execution_gate"]["allow_broadcast"] is False
+    assert any(f["rule_id"] == "PRE-EVM-008" for f in res["findings"])

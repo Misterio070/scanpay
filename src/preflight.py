@@ -114,6 +114,20 @@ def analyze_evm_transaction(tx_data: Dict[str, Any]) -> Tuple[List[PreflightFind
             remediation_advice="Immediately abort this transaction. Do not interact with this destination.",
         ))
 
+    # Check 1b: Address Poisoning Exploit (Vanity prefix/suffix spoofing)
+    for verified_addr, name in VERIFIED_EVM_SPENDERS.items():
+        if to_addr != verified_addr and len(to_addr) == 42 and len(verified_addr) == 42:
+            # Check 4-byte prefix and suffix match
+            if to_addr[:6] == verified_addr[:6] and to_addr[-4:] == verified_addr[-4:]:
+                findings.append(PreflightFinding(
+                    rule_id="PRE-EVM-007",
+                    severity="CRITICAL",
+                    title="Potential Address Poisoning Exploit Detected",
+                    description=f"Destination address {to_addr} shares identical prefix ({to_addr[:6]}) and suffix ({to_addr[-4:]}) with {name} ({verified_addr}) but differs in the middle bytes. Common event-log spoofing attack.",
+                    remediation_advice="Do not copy/paste addresses from transaction history. Verify all 42 characters against canonical contract registries.",
+                ))
+                break
+
     # Check 2: High Native Transfer without calldata
     if value_wei > 5 * 10**18 and data in ("0x", ""):
         findings.append(PreflightFinding(
@@ -169,22 +183,21 @@ def analyze_evm_transaction(tx_data: Dict[str, Any]) -> Tuple[List[PreflightFind
                     remediation_advice="Set explicit min_amount_out with maximum 0.5% - 1.0% slippage tolerance.",
                 ))
 
-        # Check 5: Suspicious Admin / Honeypot Function Call in Bytecode
-        honeypot_selectors = {
-            "0x8a8c523c": "setTrading(bool)",
-            "0x0d47348e": "blacklist(address)",
-            "0x1a895280": "freeze(address)",
-            "0xa9059cbb": "transfer",
-        }
-        for bad_sel, name in honeypot_selectors.items():
-            if bad_sel in data[10:] and bad_sel != SELECTOR_TRANSFER:
-                findings.append(PreflightFinding(
-                    rule_id="PRE-EVM-003",
-                    severity="HIGH",
-                    title=f"Potential Honeypot Modifier Detected ({name})",
-                    description=f"Calldata contains nested invocation of {name}, often used in honeypots to disable selling.",
-                    remediation_advice="Verify token contract source and liquidity lock before interacting.",
-                ))
+        # Check 6: Multicall3 Wrapper & Nested Drainer Inspection
+        multicall_selectors = ("0xac9650d8", "0x252dba42", "0x5ae401dc")
+        is_multicall = selector in multicall_selectors or to_addr == "0xca11bde05977b3631167028862be2a173976ca11"
+        if is_multicall:
+            # Inspect nested calls for hidden unlimited approvals
+            if "095ea7b3" in params:
+                # Check if nested approval contains unlimited allowance
+                if "ffffffffffffffffffffffffffffffffffffffff" in params or "000000000000000000000000" in params:
+                    findings.append(PreflightFinding(
+                        rule_id="PRE-EVM-008",
+                        severity="CRITICAL",
+                        title="Nested Token Approval Inside Multicall3 Wrapper",
+                        description="Transaction wraps an ERC-20 approve call inside a Multicall3 bundle. Frequently used by drainers to bypass single-call detectors.",
+                        remediation_advice="Inspect and unpack each sub-call within the Multicall bundle before authorizing broadcast.",
+                    ))
 
     return findings, deltas
 

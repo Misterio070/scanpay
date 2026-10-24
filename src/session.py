@@ -1,8 +1,9 @@
 """ScanPay Session Voucher Engine.
 
 Prepaid x402 session tokens (ephemeral micro-vouchers) for high-frequency
-autonomous agent coding loops (e.g. 0.006 SOL for 10 instant scans).
+autonomous agent coding loops (e.g. 0.85 USDC / 0.006 SOL for 10 instant operations).
 Eliminates on-chain transaction settlement latency during iterative code generation.
+Includes thread-safe atomic WAL transactions and race-condition immunity.
 """
 from __future__ import annotations
 
@@ -21,7 +22,8 @@ SESSION_BATCH_CREDITS = 10
 
 
 def init_session_table(conn: sqlite3.Connection):
-    """Ensure session_vouchers table exists."""
+    """Ensure session_vouchers table exists with WAL mode enabled for high concurrency."""
+    conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS session_vouchers (
             voucher_id TEXT PRIMARY KEY,
@@ -52,13 +54,13 @@ def create_session_voucher(
     credits: int = SESSION_BATCH_CREDITS,
     expiry_days: int = 30,
 ) -> dict[str, Any]:
-    """Create a new prepaid session voucher in the database."""
+    """Create a new prepaid session voucher in the database atomically."""
     voucher_id = str(uuid.uuid4())[:12]
     session_token = generate_session_token(voucher_id, payer)
     now = time.time()
     expires_at = now + (expiry_days * 86400)
 
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=10.0)
     init_session_table(conn)
     conn.execute(
         """
@@ -86,7 +88,7 @@ def create_session_voucher(
 
 def get_session_voucher(db_path: str, session_token: str) -> Optional[dict[str, Any]]:
     """Retrieve session voucher by token."""
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=10.0)
     init_session_table(conn)
     cursor = conn.execute(
         """
@@ -116,63 +118,45 @@ def get_session_voucher(db_path: str, session_token: str) -> Optional[dict[str, 
 
 
 def consume_session_credit(db_path: str, session_token: str) -> tuple[bool, int, str]:
-    """Atomically consume 1 credit from the session voucher.
+    """Atomically consume 1 credit from the session voucher using SQLite UPDATE ... RETURNING.
     
+    Immune to TOCTOU (Time-of-Check to Time-of-Use) race conditions under high concurrency.
     Returns (success, remaining_credits, message).
     """
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=10.0)
     init_session_table(conn)
     now = time.time()
 
-    # Check if voucher exists and is valid
+    # Single atomic query to check validity, decrement credit, and return updated balance
     cursor = conn.execute(
-        """
-        SELECT voucher_id, remaining_credits, expires_at, is_active
-        FROM session_vouchers
-        WHERE session_token = ?
-        """,
-        (session_token,),
-    )
-    row = cursor.fetchone()
-    if not row:
-        conn.close()
-        return False, 0, "Session voucher not found"
-
-    voucher_id, remaining_credits, expires_at, is_active = row
-
-    if not is_active:
-        conn.close()
-        return False, remaining_credits, "Session voucher is inactive"
-
-    if now > expires_at:
-        conn.close()
-        return False, remaining_credits, "Session voucher has expired"
-
-    if remaining_credits <= 0:
-        conn.close()
-        return False, 0, "Session voucher depleted (0 credits remaining)"
-
-    # Atomically decrement credit
-    cur = conn.execute(
         """
         UPDATE session_vouchers
         SET remaining_credits = remaining_credits - 1
-        WHERE session_token = ? AND remaining_credits > 0
+        WHERE session_token = ? 
+          AND remaining_credits > 0 
+          AND expires_at > ? 
+          AND is_active = 1
+        RETURNING remaining_credits;
         """,
-        (session_token,),
+        (session_token, now),
     )
+    row = cursor.fetchone()
     conn.commit()
-    affected = cur.rowcount
-    
-    # Fetch updated remaining credits
-    cursor = conn.execute(
-        "SELECT remaining_credits FROM session_vouchers WHERE session_token = ?",
-        (session_token,),
-    )
-    new_remaining = cursor.fetchone()[0]
     conn.close()
 
-    if affected > 0:
+    if row is not None:
+        new_remaining = row[0]
         return True, new_remaining, f"Credit consumed. {new_remaining} credits remaining."
-    else:
-        return False, 0, "Failed to consume credit (concurrent depletion)"
+
+    # If atomic update returned nothing, inspect reason for diagnostic message
+    existing = get_session_voucher(db_path, session_token)
+    if not existing:
+        return False, 0, "Session voucher not found"
+    if not existing["is_active"]:
+        return False, existing["remaining_credits"], "Session voucher is inactive"
+    if now > existing["expires_at"]:
+        return False, existing["remaining_credits"], "Session voucher has expired"
+    if existing["remaining_credits"] <= 0:
+        return False, 0, "Session voucher depleted (0 credits remaining)"
+
+    return False, 0, "Failed to consume credit (concurrent depletion)"
