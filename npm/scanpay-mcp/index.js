@@ -73,7 +73,7 @@ class ScanPayMCP {
     try {
       switch (method) {
         case 'initialize':
-          return { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'scanpay', version: '0.1.0' } };
+          return { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'scanpay', version: '1.2.0' } };
         
         case 'tools/list':
           return { tools: this.tools };

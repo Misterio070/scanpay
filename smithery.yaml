@@ -10,7 +10,7 @@ startCommand:
   commandFunction: |-
     (config) => ({
       command: 'npx',
-      args: ['-y', 'scanpay-mcp-server'],
+      args: ['-y', 'github:Misterio070/scanpay'],
       env: {
         SCANPAY_URL: config?.scanpayUrl || 'https://scanpay-ob3w.onrender.com'
       }

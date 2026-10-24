@@ -1,0 +1,33 @@
+{
+  "name": "scanpay",
+  "version": "1.2.0",
+  "description": "Deterministic AST code security scanner, Pre-flight Tx & Drainer Shield, and Anti-Bot Scraper Oracle with x402 v2 micropayments on Solana & Base.",
+  "main": "npm/scanpay-mcp/index.js",
+  "bin": {
+    "scanpay": "./npm/scanpay-mcp/index.js",
+    "scanpay-mcp": "./npm/scanpay-mcp/index.js",
+    "scanpay-cli": "./npm/scanpay/bin/cli.js"
+  },
+  "scripts": {
+    "start": "node ./npm/scanpay-mcp/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "security",
+    "scanner",
+    "ai-agents",
+    "x402",
+    "solana",
+    "base"
+  ],
+  "author": "alextaghiashvili",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Misterio070/scanpay.git"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
