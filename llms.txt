@@ -21,12 +21,17 @@ ScanPay is an autonomous security guardrail and oracle suite for AI agents with 
    - Pricing: 0.05 USDC or 0.00035 SOL
    - Preflight inspection for Base/Ethereum and Solana transactions. Detects honeypots, unlimited token approvals, known drainer contracts, and MEV sandwich traps.
 
-3. Anti-Bot Web Access & Scraper Oracle (`scrape_url`)
+3. Live On-Chain Token Rug & Honeypot Auditor (`audit_token`)
+   - Endpoints: `POST /api/v1/token/audit`, `POST /v2/token/audit`
+   - Pricing: 0.05 USDC or 0.00035 SOL
+   - Live on-chain bytecode & token mint inspection on Base, Ethereum, and Solana. Detects freeze/mint authorities, Token-2022 Permanent Delegate wallet seizure, bytecode blacklists, mutable tax fees, and DEX honeypot liquidity.
+
+4. Anti-Bot Web Access & Scraper Oracle (`scrape_url`)
    - Endpoints: `POST /api/v1/oracle/scrape`, `POST /v2/oracle/scrape`
    - Pricing: 0.02 USDC or 0.00015 SOL
    - Stealth browser headers, Cloudflare Turnstile/WAF bypass, HTML-to-clean-Markdown extraction saving ~90% LLM context tokens.
 
-4. Prepaid Session Micro-Vouchers
+5. Prepaid Session Micro-Vouchers (`create_session_deposit`)
    - Endpoint: `POST /api/v1/session/deposit`
    - Pricing: 0.85 USDC or 0.006 SOL (10 credits valid across all tools with 0ms RPC bypass).
    - Authenticated via `X-SCANPAY-SESSION` header.

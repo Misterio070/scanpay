@@ -79,3 +79,39 @@ def test_scraper_oracle_with_session_voucher(client):
     assert "content" in data
     assert "bot_protection" in data
     assert "X-SCANPAY-WAF-DETECTED" in r.headers
+
+
+def test_token_audit_402_challenge_with_diagnostic_preview(client):
+    payload = {
+        "chain": "base",
+        "token_address": "0xdead00000000000000000000000000000000beef",
+    }
+    r = client.post("/api/v1/token/audit", json=payload)
+    assert r.status_code == 402
+    data = r.json()
+    assert data["error"] == "payment_required"
+    assert data["paymentRequirements"]["amount"] == 350000  # 0.00035 SOL / 0.05 USDC
+    assert "diagnostic_preview" in data
+    assert data["diagnostic_preview"]["verdict_preview"] == "BLOCK"
+    assert data["diagnostic_preview"]["findings_count"] >= 1
+
+
+def test_token_audit_with_session_voucher(client):
+    from src.session import create_session_voucher
+    from main import DB_PATH
+
+    v = create_session_voucher(DB_PATH, "mock_tx_sig_for_token_audit_789", "payer_agent_3", credits=5)
+    token = v["session_token"]
+
+    payload = {
+        "chain": "base",
+        "token_address": "0xdead00000000000000000000000000000000beef",
+    }
+    r = client.post("/v2/token/audit", json=payload, headers={"X-SCANPAY-SESSION": token})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["schema_version"] == "2.0.0"
+    assert data["execution_gate"]["verdict"] == "BLOCK"
+    assert data["execution_gate"]["allow_trade"] is False
+    assert "attestation" in data
+    assert "X-SCANPAY-TOKEN-VERDICT" in r.headers

@@ -66,6 +66,13 @@
       "available": true
     },
     {
+      "id": "token-audit",
+      "name": "Live On-Chain Token Rug & Honeypot Auditor",
+      "chains": ["base", "solana", "ethereum"],
+      "price_usd": 0.05,
+      "available": true
+    },
+    {
       "id": "scraper-oracle",
       "name": "Anti-Bot Web Access & Scraper Oracle",
       "price_usd": 0.02,
@@ -88,6 +95,8 @@
     "scan_v2": "POST /v2/scan",
     "preflight": "POST /api/v1/preflight/simulate (x402 payment required)",
     "preflight_v2": "POST /v2/preflight/simulate",
+    "token_audit": "POST /api/v1/token/audit (x402 payment required)",
+    "token_audit_v2": "POST /v2/token/audit",
     "scraper_oracle": "POST /api/v1/oracle/scrape (x402 payment required)",
     "scraper_oracle_v2": "POST /v2/oracle/scrape",
     "session_deposit": "POST /api/v1/session/deposit",

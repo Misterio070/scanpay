@@ -32,6 +32,7 @@ class TestRemoteMCP:
         tool_names = [t["name"] for t in tools]
         assert "scan_code" in tool_names
         assert "simulate_tx" in tool_names
+        assert "audit_token" in tool_names
         assert "scrape_url" in tool_names
         assert "create_session_deposit" in tool_names
         assert "health_check" in tool_names
@@ -139,3 +140,47 @@ class TestRemoteMCP:
         assert data["error"]["code"] == -40200
         assert data["error"]["data"]["x402Version"] == 2
         assert "accepted_tokens" in data["error"]["data"]
+        assert "diagnostic_preview" in data["error"]["data"]
+        assert data["error"]["data"]["diagnostic_preview"]["verdict_preview"] == "BLOCK"
+        assert data["error"]["data"]["diagnostic_preview"]["findings_count"] >= 1
+
+    def test_mcp_invalid_session_token_is_rejected(self, testnet_client):
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "tools/call",
+            "params": {
+                "name": "scan_code",
+                "arguments": {
+                    "source_code": "eval('1+1')",
+                    "language": "python",
+                    "session_token": "sp_sess_fake_invalid_token"
+                }
+            }
+        }
+        r = testnet_client.post("/mcp", json=payload)
+        assert r.status_code == 200
+        data = r.json()
+        assert "error" in data
+        assert data["error"]["code"] == -40200
+
+    def test_mcp_audit_token_tool_call(self, client):
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 12,
+            "method": "tools/call",
+            "params": {
+                "name": "audit_token",
+                "arguments": {
+                    "chain": "base",
+                    "token_address": "0xdead00000000000000000000000000000000beef"
+                }
+            }
+        }
+        r = client.post("/mcp", json=payload)
+        assert r.status_code == 200
+        data = r.json()
+        res = data["result"]
+        assert res["execution_gate"]["verdict"] == "BLOCK"
+        assert res["execution_gate"]["allow_trade"] is False
+        assert "attestation" in res

@@ -38,6 +38,9 @@ def get_well_known_x402(merchant: str = MERCHANT_WALLET, evm_merchant: str = MER
             "preflight_simulate_lamports": 350000,
             "preflight_simulate_sol": 0.00035,
             "preflight_simulate_usdc": 0.05,
+            "token_audit_lamports": 350000,
+            "token_audit_sol": 0.00035,
+            "token_audit_usdc": 0.05,
             "scraper_oracle_lamports": 150000,
             "scraper_oracle_sol": 0.00015,
             "scraper_oracle_usdc": 0.02,
@@ -83,6 +86,8 @@ def get_well_known_x402(merchant: str = MERCHANT_WALLET, evm_merchant: str = MER
             "scan_v2": f"{CANONICAL_URL}/v2/scan",
             "preflight": f"{CANONICAL_URL}/api/v1/preflight/simulate",
             "preflight_v2": f"{CANONICAL_URL}/v2/preflight/simulate",
+            "token_audit": f"{CANONICAL_URL}/api/v1/token/audit",
+            "token_audit_v2": f"{CANONICAL_URL}/v2/token/audit",
             "scrape": f"{CANONICAL_URL}/api/v1/oracle/scrape",
             "scrape_v2": f"{CANONICAL_URL}/v2/oracle/scrape",
             "session_deposit": f"{CANONICAL_URL}/api/v1/session/deposit",
@@ -174,6 +179,13 @@ def get_bazaar_manifest(merchant: str = MERCHANT_WALLET, evm_merchant: str = MER
                 "available": True,
             },
             {
+                "id": "token-audit",
+                "name": "Live On-Chain Token Rug & Honeypot Auditor",
+                "chains": ["base", "solana", "ethereum"],
+                "price_usd": 0.05,
+                "available": True,
+            },
+            {
                 "id": "scraper-oracle",
                 "name": "Anti-Bot Web Access & Scraper Oracle",
                 "price_usd": 0.02,
@@ -205,6 +217,7 @@ def get_bazaar_manifest(merchant: str = MERCHANT_WALLET, evm_merchant: str = MER
             "scan": f"{CANONICAL_URL}/api/v1/scan",
             "scan_v2": f"{CANONICAL_URL}/v2/scan",
             "preflight": f"{CANONICAL_URL}/api/v1/preflight/simulate",
+            "token_audit": f"{CANONICAL_URL}/api/v1/token/audit",
             "scrape": f"{CANONICAL_URL}/api/v1/oracle/scrape",
             "session_deposit": f"{CANONICAL_URL}/api/v1/session/deposit",
             "mcp": f"{CANONICAL_URL}/mcp",
@@ -242,6 +255,10 @@ def get_well_known_mcp() -> dict[str, Any]:
             {
                 "name": "simulate_tx",
                 "description": "Pre-flight transaction & drainer shield for EVM and Solana before signing/broadcasting.",
+            },
+            {
+                "name": "audit_token",
+                "description": "Live on-chain token contract & SPL/Token-2022 rug/honeypot audit on Base, Ethereum, and Solana.",
             },
             {
                 "name": "scrape_url",
@@ -284,6 +301,7 @@ def get_agent_card() -> dict[str, Any]:
             "mcp_sse": f"{CANONICAL_URL}/sse",
             "x402_api": f"{CANONICAL_URL}/api/v1/scan",
             "preflight_api": f"{CANONICAL_URL}/api/v1/preflight/simulate",
+            "token_audit_api": f"{CANONICAL_URL}/api/v1/token/audit",
             "scraper_api": f"{CANONICAL_URL}/api/v1/oracle/scrape",
             "session_api": f"{CANONICAL_URL}/api/v1/session/deposit",
         },
@@ -351,6 +369,7 @@ ScanPay accepts micropayments on both Solana and Base (EVM).
 |---|---|---|---|
 | **Code Scan** | 0.0007 SOL (700,000 lamports) | 0.10 USDC (100,000 units) | 0.10 USDC (100,000 units) |
 | **Tx Simulation** | 0.00035 SOL (350,000 lamports) | 0.05 USDC (50,000 units) | 0.05 USDC (50,000 units) |
+| **Token Rug Audit** | 0.00035 SOL (350,000 lamports) | 0.05 USDC (50,000 units) | 0.05 USDC (50,000 units) |
 | **Scraper Oracle** | 0.00015 SOL (150,000 lamports) | 0.02 USDC (20,000 units) | 0.02 USDC (20,000 units) |
 | **10-Credit Voucher** | 0.006 SOL (6,000,000 lamports) | 0.85 USDC (850,000 units) | 0.85 USDC (850,000 units) |
 

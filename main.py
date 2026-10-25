@@ -59,10 +59,11 @@ from src.discovery import (
     get_well_known_x402,
 )
 from src.engine import RULES as PY_RULES, scan as scan_python, sha256_hex
-from src.mcp_remote import handle_mcp_jsonrpc
+from src.mcp_remote import build_diagnostic_preview, handle_mcp_jsonrpc
 from src.preflight import simulate_transaction
 from src.remediator import build_a2a_response
 from src.scraper_oracle import scrape_url
+from src.token_auditor import audit_token_contract
 from src.session import (
     SESSION_BATCH_PRICE_LAMPORTS,
     consume_session_credit,
@@ -207,6 +208,13 @@ def build_x402_requirements(service: str = "scan") -> dict:
         usdc_display = "0.05 USDC"
         desc = "ScanPay: pre-flight transaction & drainer simulation"
         tags = ["tx-simulation", "drainer-shield", "mev-protection", "solana-x402"]
+    elif service == "token":
+        lamports = 350000
+        sol_display = "0.00035 SOL"
+        usdc_units = 50000
+        usdc_display = "0.05 USDC"
+        desc = "ScanPay: live on-chain token rug & honeypot audit"
+        tags = ["token-auditor", "rug-detector", "honeypot-shield", "solana-x402", "base-x402"]
     elif service == "scrape":
         lamports = 150000
         sol_display = "0.00015 SOL"
@@ -280,18 +288,25 @@ def build_x402_requirements(service: str = "scan") -> dict:
     return reqs
 
 
-def x402_response(message: str = "Payment required", service: str = "scan") -> JSONResponse:
+def x402_response(
+    message: str = "Payment required",
+    service: str = "scan",
+    diagnostic_preview: Optional[dict] = None,
+) -> JSONResponse:
     reqs = build_x402_requirements(service=service)
     reqs_json = json.dumps(reqs)
     reqs_b64 = base64.b64encode(reqs_json.encode("utf-8")).decode("utf-8")
+    body: Dict[str, Any] = {
+        "error": "payment_required",
+        "message": message,
+        "x402Version": X402_VERSION,
+        "paymentRequirements": reqs,
+    }
+    if diagnostic_preview is not None:
+        body["diagnostic_preview"] = diagnostic_preview
     return JSONResponse(
         status_code=402,
-        content={
-            "error": "payment_required",
-            "message": message,
-            "x402Version": X402_VERSION,
-            "paymentRequirements": reqs,
-        },
+        content=body,
         headers={
             "WWW-Authenticate": "x402",
             "PAYMENT-REQUIRED": reqs_b64,
@@ -302,9 +317,9 @@ def x402_response(message: str = "Payment required", service: str = "scan") -> J
     )
 
 
-# --- Solana payment verification ---------------------------------------------
+# --- Solana & Base payment verification --------------------------------------
 
-async def verify_solana_tx(tx_sig: str, min_lamports: int = PRICE_LAMPORTS) -> dict:
+async def verify_solana_tx(tx_sig: str, min_lamports: int = PRICE_LAMPORTS, min_usdc: int = 100000) -> dict:
     if PAYMENT_MODE == "disabled":
         raise ValueError("Payment verification disabled (PAYMENT_MODE=disabled)")
     if not MERCHANT_WALLET:
@@ -347,12 +362,12 @@ async def verify_solana_tx(tx_sig: str, min_lamports: int = PRICE_LAMPORTS) -> d
                         "slot": tx.get("slot"),
                     }
 
-            # 2. SPL Token transfer (USDC: 100,000 micro-USDC = 0.10 USDC)
+            # 2. SPL Token transfer (USDC: 6 decimals)
             if itype in ("transfer", "transferChecked"):
                 amount_str = info.get("amount") or (info.get("tokenAmount", {}).get("amount"))
                 if amount_str:
                     amt = int(amount_str)
-                    if amt >= 100000:
+                    if amt >= min_usdc:
                         return {
                             "valid": True,
                             "payer": info.get("source", "") or info.get("authority", ""),
@@ -361,7 +376,7 @@ async def verify_solana_tx(tx_sig: str, min_lamports: int = PRICE_LAMPORTS) -> d
                             "network": network,
                             "slot": tx.get("slot"),
                         }
-        raise ValueError(f"No valid transfer to {MERCHANT_WALLET} of >= {min_lamports} lamports or >= 0.10 USDC")
+        raise ValueError(f"No valid transfer to {MERCHANT_WALLET} of >= {min_lamports} lamports or >= {min_usdc / 1_000_000:.2f} USDC")
 
 
 async def verify_evm_tx(tx_hash: str, min_usdc: int = 100000) -> dict:
@@ -405,7 +420,30 @@ async def verify_evm_tx(tx_hash: str, min_usdc: int = 100000) -> dict:
                             "slot": int(receipt.get("blockNumber", "0x0"), 16),
                         }
 
-        raise ValueError(f"No valid transfer to {MERCHANT_EVM_WALLET} of >= 0.10 USDC found in receipt")
+        raise ValueError(f"No valid transfer to {MERCHANT_EVM_WALLET} of >= {min_usdc / 1_000_000:.2f} USDC found in receipt")
+
+
+async def verify_mcp_payment(payment_proof: str, min_lamports: int = PRICE_LAMPORTS, min_usdc: int = 100000) -> str:
+    """Verify and consume a single-call payment proof for Remote MCP JSON-RPC tools."""
+    proof = payment_proof.strip()
+    if len(proof) > 100:
+        try:
+            decoded = base64.b64decode(proof).decode("utf-8")
+            parsed_json = json.loads(decoded)
+            proof = parsed_json.get("tx_signature") or parsed_json.get("signature") or proof
+        except Exception:
+            pass
+
+    if not check_payment(proof):
+        if proof.startswith("0x") and len(proof) == 66:
+            result = await verify_evm_tx(proof, min_usdc=min_usdc)
+        else:
+            result = await verify_solana_tx(proof, min_lamports=min_lamports, min_usdc=min_usdc)
+        store_payment(proof, result["payer"], result["amount_lamports"], result["network"])
+
+    if not check_payment(proof) or not mark_payment_used(proof):
+        raise ValueError("Payment proof already used. Each call requires a fresh payment or session voucher.")
+    return proof
 
 
 # --- Models ------------------------------------------------------------------
@@ -448,6 +486,12 @@ class SessionDepositRequest(BaseModel):
 class PreflightRequest(BaseModel):
     chain: str = Field(default="base")
     tx: Dict[str, Any] = Field(...)
+    tx_signature: Optional[str] = None
+
+
+class TokenAuditRequest(BaseModel):
+    chain: str = Field(default="base", pattern="^(base|ethereum|solana)$")
+    token_address: str = Field(..., min_length=10, max_length=128)
     tx_signature: Optional[str] = None
 
 
@@ -540,6 +584,14 @@ async def products():
         available=PAYMENT_MODE != "disabled",
     ))
     prods.append(ProductInfo(
+        id="token-audit",
+        name="Live On-Chain Token Rug & Honeypot Auditor",
+        price_sol=0.00035,
+        price_usd_approx=0.05,
+        description="Live on-chain token contract & SPL/Token-2022 audit on Base, Ethereum, and Solana. Detects freeze/mint authorities, Token-2022 Permanent Delegate wallet seizure, bytecode blacklists, mutable tax fees, and DEX honeypot liquidity.",
+        available=PAYMENT_MODE != "disabled",
+    ))
+    prods.append(ProductInfo(
         id="scraper-oracle",
         name="Anti-Bot Web Access & Scraper Oracle",
         price_sol=0.00015,
@@ -594,9 +646,13 @@ async def scan_code(
                 pass
 
         if not payment_proof:
+            src_preview = req.source_code if req.source_code is not None else (req.code or "")
+            preview = await build_diagnostic_preview("scan_code", {"code": src_preview, "language": req.language})
             return x402_response(
-                f"Payment required. Send {PRICE_SOL} SOL to {MERCHANT_WALLET} "
-                f"and retry with X-PAYMENT or X-SCANPAY-SESSION header."
+                f"Payment required. Send {PRICE_SOL} SOL to {MERCHANT_WALLET} or 0.10 Base USDC to {MERCHANT_EVM_WALLET} "
+                f"and retry with X-PAYMENT or X-SCANPAY-SESSION header.",
+                service="scan",
+                diagnostic_preview=preview,
             )
 
         if PAYMENT_MODE == "disabled":
@@ -705,7 +761,10 @@ async def session_deposit(req: SessionDepositRequest):
         return x402_response("Session deposits disabled in disabled mode.")
 
     try:
-        res = await verify_solana_tx(req.deposit_tx, min_lamports=SESSION_BATCH_PRICE_LAMPORTS)
+        if req.deposit_tx.startswith("0x") and len(req.deposit_tx) == 66:
+            res = await verify_evm_tx(req.deposit_tx, min_usdc=850000)
+        else:
+            res = await verify_solana_tx(req.deposit_tx, min_lamports=SESSION_BATCH_PRICE_LAMPORTS, min_usdc=850000)
         payer = req.payer_wallet or res.get("payer", "unknown_agent")
     except ValueError as e:
         raise HTTPException(status_code=402, detail=f"Deposit verification failed: {e}")
@@ -766,7 +825,12 @@ async def preflight_simulate(
                 pass
 
         if not payment_proof:
-            return x402_response("Payment required. Pre-flight simulation requires 0.05 USDC or 0.00035 SOL.", service="preflight")
+            preview = await build_diagnostic_preview("simulate_tx", {"chain": req.chain, "tx": req.tx})
+            return x402_response(
+                "Payment required. Pre-flight simulation requires 0.05 USDC or 0.00035 SOL.",
+                service="preflight",
+                diagnostic_preview=preview,
+            )
 
         if PAYMENT_MODE == "disabled":
             return x402_response("Payment verification disabled.", service="preflight")
@@ -776,7 +840,7 @@ async def preflight_simulate(
                 if payment_proof.startswith("0x") and len(payment_proof) == 66:
                     result = await verify_evm_tx(payment_proof, min_usdc=50000)
                 else:
-                    result = await verify_solana_tx(payment_proof, min_lamports=350000)
+                    result = await verify_solana_tx(payment_proof, min_lamports=350000, min_usdc=50000)
                 store_payment(payment_proof, result["payer"], result["amount_lamports"], result["network"])
             except ValueError as e:
                 raise HTTPException(status_code=402, detail=f"Payment verification failed: {e}")
@@ -812,6 +876,94 @@ async def preflight_simulate(
             "PAYMENT-RESPONSE": receipt_header,
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Expose-Headers": "PAYMENT-RESPONSE, X-SCANPAY-SIMULATION-VERDICT",
+        }
+    )
+
+
+# --- Live On-Chain Token Rug & Honeypot Auditor -------------------------------
+
+@app.post("/api/v1/token/audit")
+@app.post("/v2/token/audit")
+async def token_audit(
+    req: TokenAuditRequest,
+    request: Request,
+    x_payment: Optional[str] = Header(None, alias="X-PAYMENT"),
+    payment_signature: Optional[str] = Header(None, alias="PAYMENT-SIGNATURE"),
+    x_scanpay_session: Optional[str] = Header(None, alias="X-SCANPAY-SESSION"),
+    x_payment_session: Optional[str] = Header(None, alias="X-PAYMENT-SESSION"),
+):
+    session_token = x_scanpay_session or x_payment_session
+    payment_is_session = False
+    payment_proof = None
+
+    if session_token:
+        claimed, remaining, msg = consume_session_credit(DB_PATH, session_token)
+        if not claimed:
+            raise HTTPException(status_code=402, detail=f"Session voucher invalid: {msg}")
+        payment_proof = session_token
+        payment_is_session = True
+
+    if not payment_is_session:
+        payment_proof = x_payment or payment_signature or req.tx_signature
+        if payment_proof and len(payment_proof) > 100:
+            try:
+                decoded = base64.b64decode(payment_proof).decode("utf-8")
+                parsed_json = json.loads(decoded)
+                payment_proof = parsed_json.get("tx_signature") or parsed_json.get("signature") or payment_proof
+            except Exception:
+                pass
+
+        if not payment_proof:
+            preview = await build_diagnostic_preview("audit_token", {"chain": req.chain, "token_address": req.token_address})
+            return x402_response(
+                "Payment required. Live token rug & honeypot audit requires 0.05 USDC or 0.00035 SOL.",
+                service="token",
+                diagnostic_preview=preview,
+            )
+
+        if PAYMENT_MODE == "disabled":
+            return x402_response("Payment verification disabled.", service="token")
+
+        if not check_payment(payment_proof):
+            try:
+                if payment_proof.startswith("0x") and len(payment_proof) == 66:
+                    result = await verify_evm_tx(payment_proof, min_usdc=50000)
+                else:
+                    result = await verify_solana_tx(payment_proof, min_lamports=350000, min_usdc=50000)
+                store_payment(payment_proof, result["payer"], result["amount_lamports"], result["network"])
+            except ValueError as e:
+                raise HTTPException(status_code=402, detail=f"Payment verification failed: {e}")
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"RPC error: {e}")
+
+        if not check_payment(payment_proof):
+            raise HTTPException(status_code=402, detail="Payment proof already used.")
+        if not mark_payment_used(payment_proof):
+            raise HTTPException(status_code=402, detail="Payment proof already used.")
+
+    res = await audit_token_contract(
+        chain=req.chain,
+        token_address=req.token_address,
+        merchant_wallet=MERCHANT_WALLET,
+        payment_receipt=payment_proof,
+    )
+
+    verdict = res.get("execution_gate", {}).get("verdict", "WARN")
+    receipt_header = base64.b64encode(json.dumps({
+        "success": True,
+        "receipt": payment_proof or "session",
+        "service": "token",
+        "verdict": verdict,
+        "timestamp": time.time(),
+    }).encode("utf-8")).decode("utf-8")
+
+    return JSONResponse(
+        content=res,
+        headers={
+            "X-SCANPAY-TOKEN-VERDICT": verdict,
+            "PAYMENT-RESPONSE": receipt_header,
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Expose-Headers": "PAYMENT-RESPONSE, X-SCANPAY-TOKEN-VERDICT",
         }
     )
 
@@ -860,7 +1012,7 @@ async def oracle_scrape(
                 if payment_proof.startswith("0x") and len(payment_proof) == 66:
                     result = await verify_evm_tx(payment_proof, min_usdc=20000)
                 else:
-                    result = await verify_solana_tx(payment_proof, min_lamports=150000)
+                    result = await verify_solana_tx(payment_proof, min_lamports=150000, min_usdc=20000)
                 store_payment(payment_proof, result["payer"], result["amount_lamports"], result["network"])
             except ValueError as e:
                 raise HTTPException(status_code=402, detail=f"Payment verification failed: {e}")
@@ -903,7 +1055,10 @@ async def verify_payment(tx_sig: str):
     if PAYMENT_MODE == "disabled":
         return {"valid": False, "error": "Payment verification disabled"}
     try:
-        result = await verify_solana_tx(tx_sig)
+        if tx_sig.startswith("0x") and len(tx_sig) == 66:
+            result = await verify_evm_tx(tx_sig, min_usdc=20000)
+        else:
+            result = await verify_solana_tx(tx_sig, min_lamports=150000, min_usdc=20000)
         return {"valid": True, **result}
     except ValueError as e:
         return {"valid": False, "error": str(e)}
@@ -986,12 +1141,17 @@ ScanPay is an autonomous security guardrail and oracle suite for AI agents with 
    - Pricing: 0.05 USDC or 0.00035 SOL
    - Preflight inspection for Base/Ethereum and Solana transactions. Detects honeypots, unlimited token approvals, known drainer contracts, and MEV sandwich traps.
 
-3. Anti-Bot Web Access & Scraper Oracle (`scrape_url`)
+3. Live On-Chain Token Rug & Honeypot Auditor (`audit_token`)
+   - Endpoints: `POST /api/v1/token/audit`, `POST /v2/token/audit`
+   - Pricing: 0.05 USDC or 0.00035 SOL
+   - Live on-chain bytecode & token mint inspection on Base, Ethereum, and Solana. Detects freeze/mint authorities, Token-2022 Permanent Delegate wallet seizure, bytecode blacklists, mutable tax fees, and DEX honeypot liquidity.
+
+4. Anti-Bot Web Access & Scraper Oracle (`scrape_url`)
    - Endpoints: `POST /api/v1/oracle/scrape`, `POST /v2/oracle/scrape`
    - Pricing: 0.02 USDC or 0.00015 SOL
    - Stealth browser headers, Cloudflare Turnstile/WAF bypass, HTML-to-clean-Markdown extraction saving ~90% LLM context tokens.
 
-4. Prepaid Session Micro-Vouchers
+5. Prepaid Session Micro-Vouchers (`create_session_deposit`)
    - Endpoint: `POST /api/v1/session/deposit`
    - Pricing: 0.85 USDC or 0.006 SOL (10 credits valid across all tools with 0ms RPC bypass).
    - Authenticated via `X-SCANPAY-SESSION` header.
@@ -1174,6 +1334,7 @@ async def mcp_post(request: Request):
         merchant_wallet=MERCHANT_WALLET,
         payment_mode=PAYMENT_MODE,
         db_path=DB_PATH,
+        verify_payment_callback=verify_mcp_payment,
     )
     return JSONResponse(content=result, headers={"Access-Control-Allow-Origin": "*"})
 
@@ -1276,7 +1437,7 @@ async def root():
     </header>
 
     <h1>Autonomous Security Oracle for AI Agents</h1>
-    <p class="lead">Deterministic static AST code vulnerability scanner, pre-flight drainer shield, and anti-bot scraper oracle powered by x402 v2 micropayments on Solana & Base.</p>
+    <p class="lead">Deterministic static AST code vulnerability scanner, live on-chain token rug/honeypot shield, pre-flight drainer shield, and anti-bot scraper oracle powered by x402 v2 micropayments on Solana & Base.</p>
 
     <div class="grid">
       <div class="card">
@@ -1285,14 +1446,14 @@ async def root():
         <p>Deterministic AST inspection for Python, JS/TS/TSX. Detects code injection, wallet exfiltration, SSRF, prototype pollution with automated unified diffs.</p>
       </div>
       <div class="card">
+        <h3>🪙 Live Token Rug & Honeypot Shield</h3>
+        <div class="price">0.00035 SOL / 0.05 Base USDC</div>
+        <p>Live on-chain bytecode & SPL/Token-2022 audit on Base, Ethereum & Solana. Detects Permanent Delegate wallet seizure, freeze/mint authorities, and DEX honeypot liquidity.</p>
+      </div>
+      <div class="card">
         <h3>🛡️ Pre-Flight Drainer Shield</h3>
         <div class="price">0.00035 SOL / 0.05 Base USDC</div>
         <p>Simulates EVM (Base Flashblocks 200ms) and Solana transactions before broadcast. Detects honeypots, unlimited token approvals, and sandwich traps.</p>
-      </div>
-      <div class="card">
-        <h3>🌐 Anti-Bot Scraper Oracle</h3>
-        <div class="price">0.00015 SOL / 0.02 Base USDC</div>
-        <p>Stealth browser extraction bypassing Cloudflare Turnstile/WAF, returning token-optimized Markdown to cut LLM prompt context by ~90%.</p>
       </div>
       <div class="card">
         <h3>🎟️ Prepaid Session Voucher</h3>
@@ -1300,6 +1461,100 @@ async def root():
         <p>Prepaid 10-credit batch valid across all tools with 0ms RPC confirmation bypass. 15% discount for high-throughput autonomous agent loops.</p>
       </div>
     </div>
+
+    <div class="card" style="margin-bottom: 40px; border-color: var(--primary);">
+      <h3 style="margin-bottom: 12px;">⚡ Live Interactive Security Diagnostic & 1-Click x402 Unlock</h3>
+      <p style="margin-bottom: 16px;">Test any code snippet or token contract below. Unpaid calls run our real-time threat engine and return a live <strong>402 Threat Diagnostic Preview</strong> — unlock full findings, auto-remediated patches, and cryptographic oracle attestations with a Base USDC / Solana tx signature or Session Voucher.</p>
+      <div style="display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap;">
+        <button onclick="setMode('token')" id="tab-token" class="btn primary" style="cursor:pointer;">🪙 Audit Token Rug/Honeypot ($0.05)</button>
+        <button onclick="setMode('scan')" id="tab-scan" class="btn" style="cursor:pointer;">🔍 Scan Code AST ($0.10)</button>
+      </div>
+      <div id="input-token" style="display: block; margin-bottom: 12px;">
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+          <select id="token-chain" style="background:#000; color:var(--text); border:1px solid var(--border); padding:10px; border-radius:6px; font-family:var(--font-mono);">
+            <option value="base">Base Mainnet</option>
+            <option value="solana">Solana Mainnet</option>
+            <option value="ethereum">Ethereum Mainnet</option>
+          </select>
+          <input id="token-addr" type="text" value="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" placeholder="Token Contract or Mint Address (0x... or Solana Mint)" style="flex:1; min-width:260px; background:#000; color:var(--text); border:1px solid var(--border); padding:10px; border-radius:6px; font-family:var(--font-mono);" />
+        </div>
+      </div>
+      <div id="input-scan" style="display: none; margin-bottom: 12px;">
+        <textarea id="scan-code-input" rows="4" style="width:100%; background:#000; color:var(--text); border:1px solid var(--border); padding:10px; border-radius:6px; font-family:var(--font-mono);">import os, subprocess
+API_KEY = "sk-live-9876543210abcdef9876543210abcdef"
+eval(user_input)
+subprocess.Popen(cmd, shell=True)</textarea>
+      </div>
+      <div style="display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap;">
+        <input id="payment-proof" type="text" placeholder="Optional: Base/Solana Tx Hash (0x... / 5x...) or Session Token (sp_sess_...)" style="flex:1; min-width:260px; background:#000; color:var(--text); border:1px solid var(--border); padding:10px; border-radius:6px; font-family:var(--font-mono);" />
+        <button onclick="runLiveDiagnostic()" class="btn primary" style="cursor:pointer; padding:10px 20px;">🚀 Run Security Check</button>
+        <button onclick="payWithBaseWallet()" class="btn" style="cursor:pointer; border-color:var(--green); color:var(--green);">💳 1-Click Pay Base USDC (MetaMask/Coinbase)</button>
+      </div>
+      <pre id="live-output" style="margin-bottom:0; max-height:360px; overflow-y:auto;">Click "Run Security Check" to inspect a token or code snippet...</pre>
+    </div>
+
+    <script>
+      let currentMode = 'token';
+      function setMode(m) {{
+        currentMode = m;
+        document.getElementById('input-token').style.display = m === 'token' ? 'block' : 'none';
+        document.getElementById('input-scan').style.display = m === 'scan' ? 'block' : 'none';
+        document.getElementById('tab-token').className = m === 'token' ? 'btn primary' : 'btn';
+        document.getElementById('tab-scan').className = m === 'scan' ? 'btn primary' : 'btn';
+      }}
+      async function runLiveDiagnostic() {{
+        const out = document.getElementById('live-output');
+        out.textContent = '⏳ Running live deterministic inspection...';
+        const proof = document.getElementById('payment-proof').value.trim();
+        const headers = {{ 'Content-Type': 'application/json' }};
+        if (proof.startsWith('sp_sess_')) headers['X-SCANPAY-SESSION'] = proof;
+        else if (proof) headers['X-PAYMENT'] = proof;
+        try {{
+          let url = '/api/v1/token/audit';
+          let body = {{ chain: document.getElementById('token-chain').value, token_address: document.getElementById('token-addr').value.trim() }};
+          if (currentMode === 'scan') {{
+            url = '/api/v1/scan';
+            body = {{ language: 'python', code: document.getElementById('scan-code-input').value }};
+          }}
+          const resp = await fetch(url, {{ method: 'POST', headers, body: JSON.stringify(body) }});
+          const data = await resp.json();
+          out.textContent = JSON.stringify(data, null, 2);
+        }} catch (e) {{
+          out.textContent = 'Error: ' + e.message;
+        }}
+      }}
+      async function payWithBaseWallet() {{
+        const out = document.getElementById('live-output');
+        if (!window.ethereum) {{
+          out.textContent = '⚠️ No injected Web3 wallet detected (MetaMask / Coinbase Wallet / Rabby). Send USDC on Base to {MERCHANT_EVM_WALLET} or SOL to {MERCHANT_WALLET} and paste the transaction hash above.';
+          return;
+        }}
+        try {{
+          const accounts = await window.ethereum.request({{ method: 'eth_requestAccounts' }});
+          await window.ethereum.request({{
+            method: 'wallet_switchEthereumChain',
+            params: [{{ chainId: '0x2105' }}]
+          }});
+          const usdcUnits = currentMode === 'scan' ? 100000 : 50000;
+          const recipientClean = '{MERCHANT_EVM_WALLET}'.toLowerCase().replace('0x', '').padStart(64, '0');
+          const amountHex = usdcUnits.toString(16).padStart(64, '0');
+          const data = '0xa9059cbb' + recipientClean + amountHex;
+          const txHash = await window.ethereum.request({{
+            method: 'eth_sendTransaction',
+            params: [{{
+              from: accounts[0],
+              to: '{BASE_USDC_CONTRACT}',
+              data: data
+            }}]
+          }});
+          document.getElementById('payment-proof').value = txHash;
+          out.textContent = '✅ Base USDC Payment broadcasted! Tx: ' + txHash + '\\nWaiting 3 seconds for Base Flashblock confirmation before unlocking full report...';
+          setTimeout(runLiveDiagnostic, 3500);
+        }} catch (err) {{
+          out.textContent = 'Wallet transaction cancelled or failed: ' + (err.message || err);
+        }}
+      }}
+    </script>
 
     <div class="section-title">Zero-Install Agent Integration (MCP)</div>
     <pre><code>npx github:Misterio070/scanpay</code></pre>
