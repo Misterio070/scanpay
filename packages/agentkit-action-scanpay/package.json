@@ -1,0 +1,30 @@
+{
+  "name": "@scanpay/agentkit-action",
+  "version": "1.0.0",
+  "description": "ScanPay Autonomous Security Guardrail & Pre-Flight Drainer Shield Action Provider for Coinbase AgentKit on Base.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "keywords": [
+    "coinbase",
+    "agentkit",
+    "base",
+    "security",
+    "x402",
+    "drainer-shield",
+    "ai-agents",
+    "mcp"
+  ],
+  "author": "alextaghiashvili",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Misterio070/scanpay.git",
+    "directory": "packages/agentkit-action-scanpay"
+  },
+  "dependencies": {
+    "zod": "^3.22.4"
+  },
+  "peerDependencies": {
+    "@coinbase/agentkit": ">=0.1.0"
+  }
+}

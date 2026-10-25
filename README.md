@@ -79,10 +79,11 @@ npx github:Misterio070/scanpay
 
 ## 📦 Agent Framework Integrations
 
+- **Coinbase AgentKit (Base USDC):** `packages/agentkit-action-scanpay` (`@scanpay/agentkit-action`)
 - **Solana Agent Kit v2:** `packages/plugin-solana-agent-kit` (`@scanpay/plugin-solana-agent-kit`)
 - **ElizaOS:** `packages/plugin-elizaos` (`@elizaos/plugin-scanpay`)
 - **Universal Guardrail Hook:** `packages/scanpay-guardrail/scanpay-hook.py` (Claude Code `PreToolUse` hook, OpenCode, Codex, LangGraph)
-- **ERC-8183 Commerce Evaluator:** `contracts/ScanPayEvaluator.sol`
+- **ERC-8183 Commerce Evaluator:** `contracts/ScanPayEvaluatorV2.sol` (Base ERC-8004 Validation Registry bridge)
 
 ---
 
