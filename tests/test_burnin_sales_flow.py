@@ -26,27 +26,95 @@ from main import (
 
 def test_get_quote_probes_return_402_with_standard_x402_fields(client):
     """Crawlers and quote CLIs (BoltzPay, x402scan, mppx) probing GET on paid routes get 402."""
-    for path, expected_lamports in [
-        ("/api/v1/scan", 700000),
-        ("/v2/scan", 700000),
-        ("/api/v1/token/audit", 350000),
-        ("/v2/token/audit", 350000),
-        ("/api/v1/preflight/simulate", 350000),
-        ("/api/v1/oracle/scrape", 150000),
+    for path, expected_lamports, expected_usdc_str in [
+        ("/api/v1/scan", 700000, "100000"),
+        ("/v2/scan", 700000, "100000"),
+        ("/api/v1/token/audit", 350000, "50000"),
+        ("/v2/token/audit", 350000, "50000"),
+        ("/api/v1/preflight/simulate", 350000, "50000"),
+        ("/api/v1/oracle/scrape", 150000, "20000"),
     ]:
         r = client.get(path)
         assert r.status_code == 402, f"Expected 402 on GET {path}, got {r.status_code}"
         assert r.headers.get("WWW-Authenticate") == "x402"
         assert "PAYMENT-REQUIRED" in r.headers
+        # Decode strict V2 PAYMENT-REQUIRED header
+        v2_hdr = json.loads(base64.b64decode(r.headers["PAYMENT-REQUIRED"]).decode("utf-8"))
+        assert v2_hdr["x402Version"] == 2
+        assert isinstance(v2_hdr["resource"], dict)
+        assert "url" in v2_hdr["resource"]
+        assert len(v2_hdr["accepts"]) == 2
+        assert v2_hdr["accepts"][0]["scheme"] == "exact"
+        assert v2_hdr["accepts"][0]["network"] == "eip155:8453"
+        assert v2_hdr["accepts"][0]["amount"] == expected_usdc_str
+        assert v2_hdr["accepts"][0]["asset"] == BASE_USDC_CONTRACT
+        assert v2_hdr["accepts"][0]["extra"]["name"] == "USD Coin"
+        assert v2_hdr["accepts"][0]["extra"]["version"] == "2"
+        assert v2_hdr["accepts"][1]["scheme"] == "exact"
+        assert "feePayer" in v2_hdr["accepts"][1]["extra"]
+        assert "bazaar" in v2_hdr["extensions"]
+        assert "info" in v2_hdr["extensions"]["bazaar"]
+
         body = r.json()
         assert body["x402Version"] == 2
-        assert "accepts" in body and len(body["accepts"]) >= 4
+        assert "accepts" in body and len(body["accepts"]) == 2
         assert body["paymentRequirements"]["amount"] == expected_lamports
-        # Check standard @coinbase/x402 fields on each accepted payment option
         for opt in body["accepts"]:
+            assert opt["scheme"] == "exact"
+            assert isinstance(opt["amount"], str)
             assert "maxAmountRequired" in opt
             assert "payTo" in opt
             assert "resource" in opt
+
+
+def test_x402_eip3009_facilitator_settlement_flow(testnet_client):
+    """When an @x402/evm or BoltzPay agent sends a signed EIP-3009 authorization, ScanPay settles via Facilitator."""
+    eip3009_payload = {
+        "x402Version": 2,
+        "accepted": {
+            "scheme": "exact",
+            "network": "eip155:8453",
+            "amount": "100000",
+            "asset": BASE_USDC_CONTRACT,
+            "payTo": MERCHANT_EVM_WALLET,
+            "maxTimeoutSeconds": 600,
+            "extra": {"name": "USD Coin", "version": "2"},
+        },
+        "payload": {
+            "signature": "0x" + "1" * 130,
+            "authorization": {
+                "from": "0x1111111111111111111111111111111111111111",
+                "to": MERCHANT_EVM_WALLET,
+                "value": "100000",
+                "validAfter": "0",
+                "validBefore": "9999999999",
+                "nonce": "0x" + "2" * 64,
+            },
+        },
+    }
+    b64_sig = base64.b64encode(json.dumps(eip3009_payload).encode("utf-8")).decode("utf-8")
+
+    settled_tx_hash = "0x" + "c" * 64
+    mock_fac_result = {
+        "valid": True,
+        "tx_signature": settled_tx_hash,
+        "payer": "0x1111111111111111111111111111111111111111",
+        "amount_lamports": 100000,
+        "asset": "USDC",
+        "network": "testnet",
+    }
+
+    with patch("main.settle_x402_facilitator_payload", new_callable=AsyncMock, return_value=mock_fac_result):
+        r = testnet_client.post(
+            "/api/v1/scan",
+            json={"source_code": "x = 42", "language": "python"},
+            headers={"PAYMENT-SIGNATURE": b64_sig},
+        )
+        assert r.status_code == 200
+        assert r.json()["charged"] is True
+        payment_resp = json.loads(base64.b64decode(r.headers["PAYMENT-RESPONSE"]).decode("utf-8"))
+        assert payment_resp["success"] is True
+        assert payment_resp["transaction"] == settled_tx_hash
 
 
 def test_extract_payment_proof_handles_all_x402_payload_formats():

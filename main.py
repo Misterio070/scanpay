@@ -199,10 +199,55 @@ def record_scan(tx_sig: str, language: str, source_hash: str, findings_count: in
     conn.close()
 
 
-# --- x402 v2 payment requirements ---------------------------------------------
+# --- x402 v2 payment requirements & facilitator settlement -------------------
+
+FACILITATOR_URLS = [
+    os.getenv("SCANPAY_FACILITATOR_URL", "https://facilitator.payai.network").rstrip("/"),
+    "https://x402.org/facilitator",
+]
+SOLANA_MAINNET_FEE_PAYER = "CjNFTjvBhbJJd2B5ePPMHRLx1ELZpa8dwQgGL727eKww"
+SOLANA_DEVNET_FEE_PAYER = "2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4"
+
+
+def _decode_json_or_b64(raw_proof: str) -> Optional[dict]:
+    """Attempt to parse a JSON or base64-encoded JSON x402 header."""
+    cleaned = raw_proof.strip()
+    if not cleaned:
+        return None
+    if cleaned.startswith("{"):
+        try:
+            obj = json.loads(cleaned)
+            return obj if isinstance(obj, dict) else None
+        except Exception:
+            return None
+    try:
+        padded = cleaned + "=" * ((4 - len(cleaned) % 4) % 4)
+        decoded = base64.b64decode(padded).decode("utf-8")
+        if decoded.strip().startswith("{"):
+            obj = json.loads(decoded)
+            return obj if isinstance(obj, dict) else None
+    except Exception:
+        return None
+    return None
+
+
+def is_facilitator_payload(parsed_json: Optional[dict]) -> bool:
+    """Detect whether a parsed x402 JSON object is an off-chain signed facilitator payload."""
+    if not isinstance(parsed_json, dict):
+        return False
+    payload_obj = parsed_json.get("payload")
+    if not isinstance(payload_obj, dict):
+        return False
+    if "authorization" in payload_obj or "permit2Authorization" in payload_obj:
+        return True
+    tx_wire = payload_obj.get("transaction")
+    if isinstance(tx_wire, str) and len(tx_wire) > 95:
+        return True
+    return False
+
 
 def extract_payment_proof(raw_proof: Optional[str]) -> Optional[str]:
-    """Decode raw or base64-encoded x402 v1/v2 payment headers into a tx hash/signature."""
+    """Decode raw or base64-encoded x402 v1/v2 payment headers into a tx hash/signature or facilitator payload."""
     if not raw_proof:
         return None
     cleaned = raw_proof.strip()
@@ -211,39 +256,25 @@ def extract_payment_proof(raw_proof: Optional[str]) -> Optional[str]:
     if cleaned.startswith("0x") and len(cleaned) == 66:
         return cleaned
 
-    # Attempt direct JSON or base64-encoded JSON parsing (x402 v1/v2 & BoltzPay payloads)
-    for candidate in (cleaned,):
-        parsed_json = None
-        if candidate.startswith("{"):
-            try:
-                parsed_json = json.loads(candidate)
-            except Exception:
-                parsed_json = None
-        else:
-            try:
-                padded = candidate + "=" * ((4 - len(candidate) % 4) % 4)
-                decoded = base64.b64decode(padded).decode("utf-8")
-                if decoded.strip().startswith("{"):
-                    parsed_json = json.loads(decoded)
-            except Exception:
-                parsed_json = None
-
-        if isinstance(parsed_json, dict):
-            payload_obj = parsed_json.get("payload") if isinstance(parsed_json.get("payload"), dict) else {}
-            extracted = (
-                parsed_json.get("tx_signature")
-                or parsed_json.get("signature")
-                or parsed_json.get("txHash")
-                or parsed_json.get("hash")
-                or parsed_json.get("tx")
-                or payload_obj.get("tx_signature")
-                or payload_obj.get("signature")
-                or payload_obj.get("txHash")
-                or payload_obj.get("hash")
-                or payload_obj.get("transaction")
-            )
-            if extracted and isinstance(extracted, str):
-                return extracted.strip()
+    parsed_json = _decode_json_or_b64(cleaned)
+    if isinstance(parsed_json, dict):
+        if is_facilitator_payload(parsed_json):
+            return cleaned
+        payload_obj = parsed_json.get("payload") if isinstance(parsed_json.get("payload"), dict) else {}
+        extracted = (
+            parsed_json.get("tx_signature")
+            or parsed_json.get("signature")
+            or parsed_json.get("txHash")
+            or parsed_json.get("hash")
+            or parsed_json.get("tx")
+            or payload_obj.get("tx_signature")
+            or payload_obj.get("signature")
+            or payload_obj.get("txHash")
+            or payload_obj.get("hash")
+            or payload_obj.get("transaction")
+        )
+        if extracted and isinstance(extracted, str):
+            return extracted.strip()
     return cleaned
 
 
@@ -257,7 +288,15 @@ def build_x402_requirements(service: str = "scan") -> dict:
         eth_display = "0.000015 ETH"
         resource_path = f"{CANONICAL_URL}/api/v1/preflight/simulate"
         desc = "ScanPay: pre-flight transaction & drainer simulation"
-        tags = ["tx-simulation", "drainer-shield", "mev-protection", "solana-x402"]
+        tags = ["tx-simulation", "drainer-shield", "mev-protection", "solana-x402", "base-x402"]
+        body_fields = {
+            "chain": {"type": "string", "description": "Target chain: 'base', 'ethereum', or 'solana'", "required": True},
+            "tx": {"type": "object", "description": "Transaction object ({to, data, value} or {instructions})", "required": True},
+        }
+        output_example = {
+            "execution_gate": {"verdict": "ALLOW", "risk_score": 0, "allow_broadcast": True},
+            "findings": [],
+        }
     elif service == "token":
         lamports = 350000
         sol_display = "0.00035 SOL"
@@ -268,6 +307,14 @@ def build_x402_requirements(service: str = "scan") -> dict:
         resource_path = f"{CANONICAL_URL}/api/v1/token/audit"
         desc = "ScanPay: live on-chain token rug & honeypot audit"
         tags = ["token-auditor", "rug-detector", "honeypot-shield", "solana-x402", "base-x402"]
+        body_fields = {
+            "chain": {"type": "string", "description": "Target chain: 'base', 'ethereum', or 'solana'", "required": True},
+            "token_address": {"type": "string", "description": "ERC-20 contract (0x...) or Solana SPL mint address", "required": True},
+        }
+        output_example = {
+            "execution_gate": {"verdict": "SAFE", "risk_score": 0, "allow_trade": True},
+            "findings": [],
+        }
     elif service == "scrape":
         lamports = 150000
         sol_display = "0.00015 SOL"
@@ -278,6 +325,14 @@ def build_x402_requirements(service: str = "scan") -> dict:
         resource_path = f"{CANONICAL_URL}/api/v1/oracle/scrape"
         desc = "ScanPay: anti-bot web scraping & LLM markdown extraction"
         tags = ["scraper-oracle", "anti-bot", "cloudflare-bypass", "markdown-extraction"]
+        body_fields = {
+            "url": {"type": "string", "description": "Target HTTPS URL to scrape into clean LLM Markdown", "required": True},
+            "extract_mode": {"type": "string", "description": "'markdown' or 'text'", "required": False},
+        }
+        output_example = {
+            "content": {"markdown": "# Clean Extracted Content", "estimated_tokens": 120},
+            "bot_protection": {"waf_detected": False},
+        }
     else:
         lamports = PRICE_LAMPORTS
         sol_display = f"{PRICE_SOL} SOL"
@@ -286,11 +341,22 @@ def build_x402_requirements(service: str = "scan") -> dict:
         eth_wei = 30000000000000
         eth_display = "0.00003 ETH"
         resource_path = f"{CANONICAL_URL}/api/v1/scan"
-        desc = "ScanPay: code security scan"
-        tags = ["code-security", "ast-scanner", "a2a-guardrail", "solana-x402"]
+        desc = "ScanPay: deterministic AST code security scan & auto-remediation"
+        tags = ["code-security", "ast-scanner", "a2a-guardrail", "solana-x402", "base-x402"]
+        body_fields = {
+            "source_code": {"type": "string", "description": "Source code to scan for vulnerabilities & drainers", "required": True},
+            "language": {"type": "string", "description": "'python', 'javascript', 'typescript', or 'tsx'", "required": False},
+        }
+        output_example = {
+            "execution_gate": {"verdict": "PASS", "risk_score": 0, "allow_execution": True},
+            "findings_count": 0,
+            "findings": [],
+        }
 
     sol_net = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" if PAYMENT_MODE == "mainnet" else ("solana-" + PAYMENT_MODE if PAYMENT_MODE != "disabled" else "solana-devnet")
-    sol_accept_net = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" if PAYMENT_MODE == "mainnet" else "solana-devnet"
+    sol_accept_net = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" if PAYMENT_MODE == "mainnet" else "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1"
+    sol_fee_payer = SOLANA_MAINNET_FEE_PAYER if PAYMENT_MODE == "mainnet" else SOLANA_DEVNET_FEE_PAYER
+    sol_usdc_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" if PAYMENT_MODE == "mainnet" else "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
     sol_recipient = MERCHANT_WALLET or "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4"
 
     reqs = {
@@ -312,6 +378,18 @@ def build_x402_requirements(service: str = "scan") -> dict:
                 "discoverable": True,
                 "category": "security",
                 "tags": tags,
+                "info": {
+                    "input": {
+                        "type": "http",
+                        "method": "POST",
+                        "bodyType": "json",
+                        "bodyFields": body_fields,
+                    },
+                    "output": {
+                        "type": "json",
+                        "example": output_example,
+                    },
+                },
             },
             "session_voucher": {
                 "supported": True,
@@ -322,62 +400,63 @@ def build_x402_requirements(service: str = "scan") -> dict:
         },
         "accepts": [
             {
-                "scheme": "solana",
-                "network": sol_accept_net,
-                "asset": "SOL",
-                "amount": lamports,
-                "maxAmountRequired": str(lamports),
-                "amount_display": sol_display,
-                "recipient": sol_recipient,
-                "payTo": sol_recipient,
-                "resource": resource_path,
-                "description": desc,
-                "mimeType": "application/json",
-                "maxTimeoutSeconds": PAYMENT_TIMEOUT_S,
-            },
-            {
-                "scheme": "solana",
-                "network": sol_accept_net,
-                "asset": "USDC",
-                "amount": usdc_units,
-                "maxAmountRequired": str(usdc_units),
-                "amount_display": usdc_display,
-                "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-                "recipient": sol_recipient,
-                "payTo": sol_recipient,
-                "resource": resource_path,
-                "description": desc,
-                "mimeType": "application/json",
-                "maxTimeoutSeconds": PAYMENT_TIMEOUT_S,
-            },
-            {
-                "scheme": "evm",
+                "scheme": "exact",
                 "network": "eip155:8453",
-                "asset": "USDC",
-                "amount": usdc_units,
+                "asset": BASE_USDC_CONTRACT,
+                "tokenContract": BASE_USDC_CONTRACT,
+                "amount": str(usdc_units),
                 "maxAmountRequired": str(usdc_units),
                 "amount_display": usdc_display,
-                "tokenContract": BASE_USDC_CONTRACT,
                 "recipient": MERCHANT_EVM_WALLET,
                 "payTo": MERCHANT_EVM_WALLET,
                 "resource": resource_path,
                 "description": desc,
                 "mimeType": "application/json",
                 "maxTimeoutSeconds": PAYMENT_TIMEOUT_S,
+                "extra": {
+                    "name": "USD Coin",
+                    "version": "2",
+                },
+            },
+            {
+                "scheme": "exact",
+                "network": sol_accept_net,
+                "asset": sol_usdc_mint,
+                "mint": sol_usdc_mint,
+                "amount": str(usdc_units),
+                "maxAmountRequired": str(usdc_units),
+                "amount_display": usdc_display,
+                "recipient": sol_recipient,
+                "payTo": sol_recipient,
+                "resource": resource_path,
+                "description": desc,
+                "mimeType": "application/json",
+                "maxTimeoutSeconds": PAYMENT_TIMEOUT_S,
+                "extra": {
+                    "feePayer": sol_fee_payer,
+                },
+            },
+        ],
+        "nativeAccepts": [
+            {
+                "scheme": "solana",
+                "network": sol_accept_net,
+                "asset": "SOL",
+                "amount": str(lamports),
+                "maxAmountRequired": str(lamports),
+                "amount_display": sol_display,
+                "recipient": sol_recipient,
+                "payTo": sol_recipient,
             },
             {
                 "scheme": "evm",
                 "network": "eip155:8453",
                 "asset": "ETH",
-                "amount": eth_wei,
+                "amount": str(eth_wei),
                 "maxAmountRequired": str(eth_wei),
                 "amount_display": eth_display,
                 "recipient": MERCHANT_EVM_WALLET,
                 "payTo": MERCHANT_EVM_WALLET,
-                "resource": resource_path,
-                "description": desc,
-                "mimeType": "application/json",
-                "maxTimeoutSeconds": PAYMENT_TIMEOUT_S,
             },
         ],
     }
@@ -393,12 +472,39 @@ def x402_response(
 ) -> JSONResponse:
     reqs = build_x402_requirements(service=service)
     reqs_json = json.dumps(reqs)
-    reqs_b64 = base64.b64encode(reqs_json.encode("utf-8")).decode("utf-8")
+
+    # Strict @x402/core PaymentRequiredV2Schema + @boltzpay/protocols V2 header structure
+    v2_header_payload = {
+        "x402Version": X402_VERSION,
+        "error": message,
+        "resource": {
+            "url": reqs["resource"],
+            "description": reqs["description"],
+            "mimeType": "application/json",
+        },
+        "accepts": [
+            {
+                "scheme": a["scheme"],
+                "network": a["network"],
+                "amount": str(a["amount"]),
+                "asset": a["asset"],
+                "payTo": a["payTo"],
+                "maxTimeoutSeconds": a["maxTimeoutSeconds"],
+                "extra": a.get("extra", {}),
+            }
+            for a in reqs["accepts"]
+        ],
+        "extensions": reqs["extensions"],
+    }
+    reqs_b64 = base64.b64encode(json.dumps(v2_header_payload).encode("utf-8")).decode("utf-8")
+
     body: Dict[str, Any] = {
         "error": "payment_required",
         "message": message,
         "x402Version": X402_VERSION,
+        "resource": v2_header_payload["resource"],
         "accepts": reqs["accepts"],
+        "extensions": reqs["extensions"],
         "paymentRequirements": reqs,
     }
     if diagnostic_preview is not None:
@@ -414,6 +520,75 @@ def x402_response(
             "Access-Control-Expose-Headers": "PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-PAYMENT-REQUIREMENTS, WWW-Authenticate",
         }
     )
+
+
+async def settle_x402_facilitator_payload(raw_proof: str, service: str = "scan") -> Optional[dict]:
+    """Settle an off-chain signed x402 V1/V2 payload (EIP-3009 on Base or partially signed tx on Solana) via x402 Facilitator."""
+    parsed = _decode_json_or_b64(raw_proof)
+    if not is_facilitator_payload(parsed):
+        return None
+    assert isinstance(parsed, dict)
+
+    reqs = build_x402_requirements(service=service)
+    accepted_from_client = parsed.get("accepted") if isinstance(parsed.get("accepted"), dict) else {}
+    target_network = str(accepted_from_client.get("network") or parsed.get("network") or "")
+
+    # Match against our canonical server-side payment requirements (never trust client-supplied payTo/amount)
+    matched_req = None
+    for candidate in reqs["accepts"]:
+        if target_network and candidate["network"] == target_network:
+            matched_req = candidate
+            break
+    if matched_req is None:
+        payload_obj = parsed.get("payload", {})
+        if "authorization" in payload_obj or "permit2Authorization" in payload_obj:
+            matched_req = reqs["accepts"][0]  # Base USDC
+        else:
+            matched_req = reqs["accepts"][1]  # Solana USDC
+
+    strict_requirement = {
+        "scheme": matched_req["scheme"],
+        "network": matched_req["network"],
+        "amount": str(matched_req["amount"]),
+        "asset": matched_req["asset"],
+        "payTo": matched_req["payTo"],
+        "maxTimeoutSeconds": matched_req["maxTimeoutSeconds"],
+        "extra": matched_req.get("extra", {}),
+    }
+
+    last_err = "Unknown facilitator settlement error"
+    async with httpx.AsyncClient(timeout=25) as client:
+        for fac_url in FACILITATOR_URLS:
+            try:
+                resp = await client.post(
+                    f"{fac_url}/settle",
+                    json={
+                        "x402Version": parsed.get("x402Version", 2),
+                        "paymentPayload": parsed,
+                        "paymentRequirements": strict_requirement,
+                    },
+                )
+                data = resp.json()
+                if resp.status_code == 200 and data.get("success") is True and data.get("transaction"):
+                    net_str = str(data.get("network", strict_requirement["network"]))
+                    net_label = "base" if "eip155" in net_str else ("mainnet" if PAYMENT_MODE == "mainnet" else PAYMENT_MODE)
+                    return {
+                        "valid": True,
+                        "tx_signature": str(data["transaction"]),
+                        "payer": str(data.get("payer") or "x402_agent"),
+                        "amount_lamports": int(strict_requirement["amount"]),
+                        "asset": "USDC",
+                        "network": net_label,
+                    }
+                reason = data.get("errorReason") or data.get("errorMessage") or data.get("invalidReason") or resp.text[:200]
+                last_err = f"{reason}"
+                # If signature/authorization is explicitly invalid, don't retry secondary facilitator
+                if "invalid" in str(reason).lower() or "insufficient" in str(reason).lower():
+                    break
+            except Exception as e:
+                last_err = str(e)
+
+    raise ValueError(f"x402 facilitator settlement failed: {last_err}")
 
 
 # --- Solana & Base payment verification --------------------------------------
@@ -570,8 +745,13 @@ async def verify_evm_tx(tx_hash: str, min_usdc: int = 100000) -> dict:
 async def verify_mcp_payment(payment_proof: str, min_lamports: int = PRICE_LAMPORTS, min_usdc: int = 100000) -> str:
     """Verify and consume a single-call payment proof for Remote MCP JSON-RPC tools."""
     proof = extract_payment_proof(payment_proof) or payment_proof.strip()
+    svc = "scrape" if min_usdc <= 20000 else ("token" if min_usdc <= 50000 else "scan")
 
-    if not check_payment(proof):
+    facilitator_res = await settle_x402_facilitator_payload(proof, service=svc)
+    if facilitator_res:
+        proof = facilitator_res["tx_signature"]
+        store_payment(proof, facilitator_res["payer"], facilitator_res["amount_lamports"], facilitator_res["network"])
+    elif not check_payment(proof):
         if proof.startswith("0x") and len(proof) == 66:
             result = await verify_evm_tx(proof, min_usdc=min_usdc)
         else:
@@ -650,12 +830,30 @@ class ProductInfo(BaseModel):
 
 # --- App Lifespan ------------------------------------------------------------
 
+async def _render_keepalive_loop():
+    """Periodically ping canonical ingress URL on Render to prevent 15-min cold-start spin-down."""
+    while True:
+        await asyncio.sleep(540)  # 9 minutes
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.get(f"{CANONICAL_URL}/api/v1/health")
+        except Exception:
+            pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     logger.info(f"ScanPay starting — payment_mode={PAYMENT_MODE}, "
                 f"js_engine={JS_AVAILABLE}, db={DB_PATH}")
-    yield
+    keepalive_task = None
+    if os.getenv("RENDER"):
+        keepalive_task = asyncio.create_task(_render_keepalive_loop())
+    try:
+        yield
+    finally:
+        if keepalive_task:
+            keepalive_task.cancel()
 
 
 app = FastAPI(
@@ -802,7 +1000,11 @@ async def scan_code(
 
         if not check_payment(payment_proof):
             try:
-                if payment_proof.startswith("0x") and len(payment_proof) == 66:
+                facilitator_res = await settle_x402_facilitator_payload(payment_proof, service="scan")
+                if facilitator_res:
+                    payment_proof = facilitator_res["tx_signature"]
+                    result = facilitator_res
+                elif payment_proof.startswith("0x") and len(payment_proof) == 66:
                     result = await verify_evm_tx(payment_proof)
                 else:
                     result = await verify_solana_tx(payment_proof)
@@ -876,8 +1078,11 @@ async def scan_code(
         **a2a_dict,
     }
 
+    settled_net = "eip155:8453" if (payment_proof or "").startswith("0x") else "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
     receipt_header = base64.b64encode(json.dumps({
-        "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        "success": True,
+        "transaction": payment_proof or "session",
+        "network": settled_net,
         "receipt": payment_proof,
         "status": "settled",
         "verdict": verdict,
@@ -1034,7 +1239,11 @@ async def preflight_simulate(
 
         if not check_payment(payment_proof):
             try:
-                if payment_proof.startswith("0x") and len(payment_proof) == 66:
+                facilitator_res = await settle_x402_facilitator_payload(payment_proof, service="preflight")
+                if facilitator_res:
+                    payment_proof = facilitator_res["tx_signature"]
+                    result = facilitator_res
+                elif payment_proof.startswith("0x") and len(payment_proof) == 66:
                     result = await verify_evm_tx(payment_proof, min_usdc=50000)
                 else:
                     result = await verify_solana_tx(payment_proof, min_lamports=350000, min_usdc=50000)
@@ -1058,9 +1267,12 @@ async def preflight_simulate(
 
     verdict = res.get("execution_gate", {}).get("verdict", "WARN")
     status_header = "ALLOWED" if verdict == "ALLOW" else ("WARNED" if verdict == "WARN" else "BLOCKED")
+    settled_net = "eip155:8453" if (payment_proof or "").startswith("0x") else "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
 
     receipt_header = base64.b64encode(json.dumps({
         "success": True,
+        "transaction": payment_proof or "session",
+        "network": settled_net,
         "receipt": payment_proof or "session",
         "service": "preflight",
         "timestamp": time.time(),
@@ -1123,7 +1335,11 @@ async def token_audit(
 
         if not check_payment(payment_proof):
             try:
-                if payment_proof.startswith("0x") and len(payment_proof) == 66:
+                facilitator_res = await settle_x402_facilitator_payload(payment_proof, service="token")
+                if facilitator_res:
+                    payment_proof = facilitator_res["tx_signature"]
+                    result = facilitator_res
+                elif payment_proof.startswith("0x") and len(payment_proof) == 66:
                     result = await verify_evm_tx(payment_proof, min_usdc=50000)
                 else:
                     result = await verify_solana_tx(payment_proof, min_lamports=350000, min_usdc=50000)
@@ -1146,8 +1362,11 @@ async def token_audit(
     )
 
     verdict = res.get("execution_gate", {}).get("verdict", "WARN")
+    settled_net = "eip155:8453" if (payment_proof or "").startswith("0x") else "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
     receipt_header = base64.b64encode(json.dumps({
         "success": True,
+        "transaction": payment_proof or "session",
+        "network": settled_net,
         "receipt": payment_proof or "session",
         "service": "token",
         "verdict": verdict,
@@ -1206,7 +1425,11 @@ async def oracle_scrape(
 
         if not check_payment(payment_proof):
             try:
-                if payment_proof.startswith("0x") and len(payment_proof) == 66:
+                facilitator_res = await settle_x402_facilitator_payload(payment_proof, service="scrape")
+                if facilitator_res:
+                    payment_proof = facilitator_res["tx_signature"]
+                    result = facilitator_res
+                elif payment_proof.startswith("0x") and len(payment_proof) == 66:
                     result = await verify_evm_tx(payment_proof, min_usdc=20000)
                 else:
                     result = await verify_solana_tx(payment_proof, min_lamports=150000, min_usdc=20000)
@@ -1229,8 +1452,11 @@ async def oracle_scrape(
         payment_receipt=payment_proof,
     )
 
+    settled_net = "eip155:8453" if (payment_proof or "").startswith("0x") else "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
     receipt_header = base64.b64encode(json.dumps({
         "success": True,
+        "transaction": payment_proof or "session",
+        "network": settled_net,
         "receipt": payment_proof or "session",
         "service": "scrape",
         "timestamp": time.time(),
@@ -1268,7 +1494,7 @@ async def verify_payment(tx_sig: str):
 @app.get("/.well-known/x402")
 async def well_known_x402():
     return JSONResponse(
-        content=get_well_known_x402(MERCHANT_WALLET, PRICE_LAMPORTS),
+        content=get_well_known_x402(merchant=MERCHANT_WALLET, evm_merchant=MERCHANT_EVM_WALLET, price_lamports=PRICE_LAMPORTS),
         headers={"Access-Control-Allow-Origin": "*"}
     )
 
