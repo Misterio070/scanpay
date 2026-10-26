@@ -68,6 +68,7 @@ from src.session import (
     SESSION_BATCH_PRICE_LAMPORTS,
     consume_session_credit,
     create_session_voucher,
+    get_session_voucher,
     init_session_table,
 )
 
@@ -200,12 +201,61 @@ def record_scan(tx_sig: str, language: str, source_hash: str, findings_count: in
 
 # --- x402 v2 payment requirements ---------------------------------------------
 
+def extract_payment_proof(raw_proof: Optional[str]) -> Optional[str]:
+    """Decode raw or base64-encoded x402 v1/v2 payment headers into a tx hash/signature."""
+    if not raw_proof:
+        return None
+    cleaned = raw_proof.strip()
+    if not cleaned:
+        return None
+    if cleaned.startswith("0x") and len(cleaned) == 66:
+        return cleaned
+
+    # Attempt direct JSON or base64-encoded JSON parsing (x402 v1/v2 & BoltzPay payloads)
+    for candidate in (cleaned,):
+        parsed_json = None
+        if candidate.startswith("{"):
+            try:
+                parsed_json = json.loads(candidate)
+            except Exception:
+                parsed_json = None
+        else:
+            try:
+                padded = candidate + "=" * ((4 - len(candidate) % 4) % 4)
+                decoded = base64.b64decode(padded).decode("utf-8")
+                if decoded.strip().startswith("{"):
+                    parsed_json = json.loads(decoded)
+            except Exception:
+                parsed_json = None
+
+        if isinstance(parsed_json, dict):
+            payload_obj = parsed_json.get("payload") if isinstance(parsed_json.get("payload"), dict) else {}
+            extracted = (
+                parsed_json.get("tx_signature")
+                or parsed_json.get("signature")
+                or parsed_json.get("txHash")
+                or parsed_json.get("hash")
+                or parsed_json.get("tx")
+                or payload_obj.get("tx_signature")
+                or payload_obj.get("signature")
+                or payload_obj.get("txHash")
+                or payload_obj.get("hash")
+                or payload_obj.get("transaction")
+            )
+            if extracted and isinstance(extracted, str):
+                return extracted.strip()
+    return cleaned
+
+
 def build_x402_requirements(service: str = "scan") -> dict:
     if service == "preflight":
         lamports = 350000
         sol_display = "0.00035 SOL"
         usdc_units = 50000
         usdc_display = "0.05 USDC"
+        eth_wei = 15000000000000
+        eth_display = "0.000015 ETH"
+        resource_path = f"{CANONICAL_URL}/api/v1/preflight/simulate"
         desc = "ScanPay: pre-flight transaction & drainer simulation"
         tags = ["tx-simulation", "drainer-shield", "mev-protection", "solana-x402"]
     elif service == "token":
@@ -213,6 +263,9 @@ def build_x402_requirements(service: str = "scan") -> dict:
         sol_display = "0.00035 SOL"
         usdc_units = 50000
         usdc_display = "0.05 USDC"
+        eth_wei = 15000000000000
+        eth_display = "0.000015 ETH"
+        resource_path = f"{CANONICAL_URL}/api/v1/token/audit"
         desc = "ScanPay: live on-chain token rug & honeypot audit"
         tags = ["token-auditor", "rug-detector", "honeypot-shield", "solana-x402", "base-x402"]
     elif service == "scrape":
@@ -220,6 +273,9 @@ def build_x402_requirements(service: str = "scan") -> dict:
         sol_display = "0.00015 SOL"
         usdc_units = 20000
         usdc_display = "0.02 USDC"
+        eth_wei = 6000000000000
+        eth_display = "0.000006 ETH"
+        resource_path = f"{CANONICAL_URL}/api/v1/oracle/scrape"
         desc = "ScanPay: anti-bot web scraping & LLM markdown extraction"
         tags = ["scraper-oracle", "anti-bot", "cloudflare-bypass", "markdown-extraction"]
     else:
@@ -227,17 +283,27 @@ def build_x402_requirements(service: str = "scan") -> dict:
         sol_display = f"{PRICE_SOL} SOL"
         usdc_units = 100000
         usdc_display = "0.10 USDC"
+        eth_wei = 30000000000000
+        eth_display = "0.00003 ETH"
+        resource_path = f"{CANONICAL_URL}/api/v1/scan"
         desc = "ScanPay: code security scan"
         tags = ["code-security", "ast-scanner", "a2a-guardrail", "solana-x402"]
+
+    sol_net = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" if PAYMENT_MODE == "mainnet" else ("solana-" + PAYMENT_MODE if PAYMENT_MODE != "disabled" else "solana-devnet")
+    sol_accept_net = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" if PAYMENT_MODE == "mainnet" else "solana-devnet"
+    sol_recipient = MERCHANT_WALLET or "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4"
 
     reqs = {
         "x402Version": X402_VERSION,
         "scheme": "solana",
-        "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" if PAYMENT_MODE == "mainnet" else ("solana-" + PAYMENT_MODE if PAYMENT_MODE != "disabled" else "solana-devnet"),
+        "network": sol_net,
         "amount": lamports,
+        "maxAmountRequired": str(lamports),
         "amount_display": sol_display,
         "asset": "SOL",
-        "recipient": MERCHANT_WALLET or "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4",
+        "recipient": sol_recipient,
+        "payTo": sol_recipient,
+        "resource": resource_path,
         "description": desc,
         "mimeType": "application/json",
         "maxTimeoutSeconds": PAYMENT_TIMEOUT_S,
@@ -257,29 +323,61 @@ def build_x402_requirements(service: str = "scan") -> dict:
         "accepts": [
             {
                 "scheme": "solana",
-                "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" if PAYMENT_MODE == "mainnet" else ("solana-" + ("devnet" if PAYMENT_MODE == "testnet" else "devnet")),
+                "network": sol_accept_net,
                 "asset": "SOL",
                 "amount": lamports,
+                "maxAmountRequired": str(lamports),
                 "amount_display": sol_display,
-                "recipient": MERCHANT_WALLET or "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4",
+                "recipient": sol_recipient,
+                "payTo": sol_recipient,
+                "resource": resource_path,
+                "description": desc,
+                "mimeType": "application/json",
+                "maxTimeoutSeconds": PAYMENT_TIMEOUT_S,
             },
             {
                 "scheme": "solana",
-                "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" if PAYMENT_MODE == "mainnet" else ("solana-" + ("devnet" if PAYMENT_MODE == "testnet" else "devnet")),
+                "network": sol_accept_net,
                 "asset": "USDC",
                 "amount": usdc_units,
+                "maxAmountRequired": str(usdc_units),
                 "amount_display": usdc_display,
                 "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-                "recipient": MERCHANT_WALLET or "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4",
+                "recipient": sol_recipient,
+                "payTo": sol_recipient,
+                "resource": resource_path,
+                "description": desc,
+                "mimeType": "application/json",
+                "maxTimeoutSeconds": PAYMENT_TIMEOUT_S,
             },
             {
                 "scheme": "evm",
                 "network": "eip155:8453",
                 "asset": "USDC",
                 "amount": usdc_units,
+                "maxAmountRequired": str(usdc_units),
                 "amount_display": usdc_display,
                 "tokenContract": BASE_USDC_CONTRACT,
                 "recipient": MERCHANT_EVM_WALLET,
+                "payTo": MERCHANT_EVM_WALLET,
+                "resource": resource_path,
+                "description": desc,
+                "mimeType": "application/json",
+                "maxTimeoutSeconds": PAYMENT_TIMEOUT_S,
+            },
+            {
+                "scheme": "evm",
+                "network": "eip155:8453",
+                "asset": "ETH",
+                "amount": eth_wei,
+                "maxAmountRequired": str(eth_wei),
+                "amount_display": eth_display,
+                "recipient": MERCHANT_EVM_WALLET,
+                "payTo": MERCHANT_EVM_WALLET,
+                "resource": resource_path,
+                "description": desc,
+                "mimeType": "application/json",
+                "maxTimeoutSeconds": PAYMENT_TIMEOUT_S,
             },
         ],
     }
@@ -300,6 +398,7 @@ def x402_response(
         "error": "payment_required",
         "message": message,
         "x402Version": X402_VERSION,
+        "accepts": reqs["accepts"],
         "paymentRequirements": reqs,
     }
     if diagnostic_preview is not None:
@@ -328,13 +427,20 @@ async def verify_solana_tx(tx_sig: str, min_lamports: int = PRICE_LAMPORTS, min_
     network = PAYMENT_MODE if PAYMENT_MODE != "disabled" else "testnet"
 
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(SOLANA_RPC, json={
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "getTransaction",
-            "params": [tx_sig, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}]
-        })
-        data = resp.json()
+        data: Dict[str, Any] = {}
+        for attempt in range(3):
+            resp = await client.post(SOLANA_RPC, json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getTransaction",
+                "params": [tx_sig, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}]
+            })
+            data = resp.json()
+            if data.get("result"):
+                break
+            if attempt < 2:
+                await asyncio.sleep(0.4)
+
         if not data.get("result"):
             raise ValueError("Transaction not found")
 
@@ -367,6 +473,9 @@ async def verify_solana_tx(tx_sig: str, min_lamports: int = PRICE_LAMPORTS, min_
                 amount_str = info.get("amount") or (info.get("tokenAmount", {}).get("amount"))
                 if amount_str:
                     amt = int(amount_str)
+                    mint = info.get("mint")
+                    if mint and mint != "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v":
+                        continue
                     if amt >= min_usdc:
                         return {
                             "valid": True,
@@ -385,24 +494,35 @@ async def verify_evm_tx(tx_hash: str, min_usdc: int = 100000) -> dict:
         raise ValueError("Payment verification disabled (PAYMENT_MODE=disabled)")
 
     recipient_padded = "0x" + MERCHANT_EVM_WALLET.lower().replace("0x", "").rjust(64, "0")
+    net_label = "base" if PAYMENT_MODE == "mainnet" else PAYMENT_MODE
 
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(BASE_RPC, json={
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "eth_getTransactionReceipt",
-            "params": [tx_hash]
-        })
-        data = resp.json()
-        receipt = data.get("result")
+        receipt = None
+        for attempt in range(3):
+            resp = await client.post(BASE_RPC, json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "eth_getTransactionReceipt",
+                "params": [tx_hash]
+            })
+            data = resp.json()
+            receipt = data.get("result")
+            if receipt:
+                break
+            if attempt < 2:
+                await asyncio.sleep(0.4)
+
         if not receipt:
             raise ValueError(f"Transaction receipt not found on Base ({tx_hash})")
 
         if receipt.get("status") != "0x1":
             raise ValueError("Transaction failed on Base")
 
-        # Parse event logs for ERC-20 Transfer to merchant EVM wallet
+        # 1. Parse event logs for ERC-20 USDC Transfer to merchant EVM wallet
         for log in receipt.get("logs", []):
+            log_addr = log.get("address", "").lower()
+            if log_addr and log_addr != BASE_USDC_CONTRACT.lower():
+                continue
             topics = log.get("topics", [])
             if len(topics) >= 3 and topics[0].lower() == TRANSFER_EVENT_TOPIC:
                 to_addr = topics[2].lower()
@@ -416,23 +536,40 @@ async def verify_evm_tx(tx_hash: str, min_usdc: int = 100000) -> dict:
                             "payer": payer_addr,
                             "amount_lamports": value,
                             "asset": "USDC",
-                            "network": "base",
+                            "network": net_label,
                             "slot": int(receipt.get("blockNumber", "0x0"), 16),
                         }
 
-        raise ValueError(f"No valid transfer to {MERCHANT_EVM_WALLET} of >= {min_usdc / 1_000_000:.2f} USDC found in receipt")
+        # 2. Fallback: Check Native Base ETH Transfer via eth_getTransactionByHash
+        min_eth_wei = int(min_usdc) * 300_000_000  # e.g. 50,000 micro-USDC ($0.05) -> 1.5e13 wei (0.000015 ETH)
+        try:
+            tx_resp = await client.post(BASE_RPC, json={
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "eth_getTransactionByHash",
+                "params": [tx_hash]
+            })
+            tx_obj = tx_resp.json().get("result") or {}
+            to_native = (tx_obj.get("to") or "").lower()
+            val_wei = int(tx_obj.get("value", "0x0"), 16)
+            if to_native == MERCHANT_EVM_WALLET.lower() and val_wei >= min_eth_wei:
+                return {
+                    "valid": True,
+                    "payer": tx_obj.get("from", "unknown"),
+                    "amount_lamports": val_wei,
+                    "asset": "ETH",
+                    "network": net_label,
+                    "slot": int(receipt.get("blockNumber", "0x0"), 16),
+                }
+        except Exception:
+            pass
+
+        raise ValueError(f"No valid transfer to {MERCHANT_EVM_WALLET} of >= {min_usdc / 1_000_000:.2f} USDC or >= {min_eth_wei / 1e18:.6f} ETH found in receipt")
 
 
 async def verify_mcp_payment(payment_proof: str, min_lamports: int = PRICE_LAMPORTS, min_usdc: int = 100000) -> str:
     """Verify and consume a single-call payment proof for Remote MCP JSON-RPC tools."""
-    proof = payment_proof.strip()
-    if len(proof) > 100:
-        try:
-            decoded = base64.b64decode(proof).decode("utf-8")
-            parsed_json = json.loads(decoded)
-            proof = parsed_json.get("tx_signature") or parsed_json.get("signature") or proof
-        except Exception:
-            pass
+    proof = extract_payment_proof(payment_proof) or payment_proof.strip()
 
     if not check_payment(proof):
         if proof.startswith("0x") and len(proof) == 66:
@@ -610,6 +747,17 @@ async def products():
     return prods
 
 
+@app.get("/api/v1/scan")
+@app.get("/v2/scan")
+async def scan_code_quote():
+    """x402 / BoltzPay / Bazaar GET quote & discovery endpoint for code scanning."""
+    return x402_response(
+        f"Payment required. Send {PRICE_SOL} SOL to {MERCHANT_WALLET} or 0.10 Base USDC to {MERCHANT_EVM_WALLET} "
+        f"and call POST /api/v1/scan with X-PAYMENT or X-SCANPAY-SESSION header.",
+        service="scan",
+    )
+
+
 @app.post("/api/v1/scan")
 @app.post("/v2/scan")
 async def scan_code(
@@ -634,16 +782,7 @@ async def scan_code(
 
     # 2. Single-scan payment proof check
     if not payment_is_session:
-        payment_proof = x_payment or payment_signature or req.tx_signature
-
-        # Handle potential base64-encoded x402 v2 payment payload
-        if payment_proof and len(payment_proof) > 100:
-            try:
-                decoded = base64.b64decode(payment_proof).decode("utf-8")
-                parsed_json = json.loads(decoded)
-                payment_proof = parsed_json.get("tx_signature") or parsed_json.get("signature") or payment_proof
-            except Exception:
-                pass
+        payment_proof = extract_payment_proof(x_payment or payment_signature or req.tx_signature)
 
         if not payment_proof:
             src_preview = req.source_code if req.source_code is not None else (req.code or "")
@@ -760,23 +899,32 @@ async def session_deposit(req: SessionDepositRequest):
     if PAYMENT_MODE == "disabled":
         return x402_response("Session deposits disabled in disabled mode.")
 
+    deposit_proof = extract_payment_proof(req.deposit_tx) or req.deposit_tx.strip()
+
     try:
-        if req.deposit_tx.startswith("0x") and len(req.deposit_tx) == 66:
-            res = await verify_evm_tx(req.deposit_tx, min_usdc=850000)
+        if not check_payment(deposit_proof):
+            if deposit_proof.startswith("0x") and len(deposit_proof) == 66:
+                res = await verify_evm_tx(deposit_proof, min_usdc=850000)
+            else:
+                res = await verify_solana_tx(deposit_proof, min_lamports=SESSION_BATCH_PRICE_LAMPORTS, min_usdc=850000)
+            store_payment(deposit_proof, res.get("payer", "unknown_agent"), res["amount_lamports"], res["network"])
+            payer = req.payer_wallet or res.get("payer", "unknown_agent")
         else:
-            res = await verify_solana_tx(req.deposit_tx, min_lamports=SESSION_BATCH_PRICE_LAMPORTS, min_usdc=850000)
-        payer = req.payer_wallet or res.get("payer", "unknown_agent")
+            payer = req.payer_wallet or "unknown_agent"
+
+        if not check_payment(deposit_proof) or not mark_payment_used(deposit_proof):
+            raise ValueError("Deposit transaction proof already used.")
+
+        voucher = create_session_voucher(
+            db_path=DB_PATH,
+            deposit_tx=deposit_proof,
+            payer=payer,
+            credits=10,
+        )
     except ValueError as e:
         raise HTTPException(status_code=402, detail=f"Deposit verification failed: {e}")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"RPC error: {e}")
-
-    voucher = create_session_voucher(
-        db_path=DB_PATH,
-        deposit_tx=req.deposit_tx,
-        payer=payer,
-        credits=10,
-    )
 
     return JSONResponse(
         content={
@@ -791,7 +939,63 @@ async def session_deposit(req: SessionDepositRequest):
     )
 
 
+@app.get("/api/v1/session/status")
+@app.get("/v2/session/status")
+async def session_status(
+    session_token: Optional[str] = None,
+    x_scanpay_session: Optional[str] = Header(None, alias="X-SCANPAY-SESSION"),
+    x_payment_session: Optional[str] = Header(None, alias="X-PAYMENT-SESSION"),
+):
+    token = session_token or x_scanpay_session or x_payment_session
+    if not token:
+        raise HTTPException(status_code=400, detail="Provide session_token query param or X-SCANPAY-SESSION header.")
+    voucher = get_session_voucher(DB_PATH, token.strip())
+    if not voucher:
+        raise HTTPException(status_code=404, detail="Session voucher not found.")
+    now = time.time()
+    return {
+        "voucher_id": voucher["voucher_id"],
+        "remaining_credits": voucher["remaining_credits"],
+        "total_credits": voucher["total_credits"],
+        "is_active": voucher["is_active"] and voucher["remaining_credits"] > 0 and voucher["expires_at"] > now,
+        "expires_at": voucher["expires_at"],
+    }
+
+
+@app.get("/api/v1/stats")
+async def service_stats():
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        total_scans = conn.execute("SELECT COUNT(*) FROM scans").fetchone()[0]
+        total_payments = conn.execute("SELECT COUNT(*) FROM payments WHERE used = 1").fetchone()[0]
+        active_vouchers = conn.execute("SELECT COUNT(*) FROM session_vouchers WHERE remaining_credits > 0").fetchone()[0]
+    except Exception:
+        total_scans, total_payments, active_vouchers = 0, 0, 0
+    finally:
+        conn.close()
+    return {
+        "status": "operational",
+        "engine_version": ENGINE_VERSION,
+        "payment_mode": PAYMENT_MODE,
+        "rules_count": {"python": len(PY_RULES), "javascript_typescript": len(JS_RULES)},
+        "supported_chains": ["solana", "base", "ethereum"],
+        "accepted_assets": ["SOL", "USDC (Base)", "ETH (Base)", "USDC (Solana)"],
+        "telemetry": {
+            "total_scans_processed": total_scans,
+            "settled_x402_payments": total_payments,
+            "active_session_vouchers": active_vouchers,
+        },
+    }
+
+
 # --- Pre-Flight Transaction & Drainer Shield ---------------------------------
+
+@app.get("/api/v1/preflight/simulate")
+@app.get("/v2/preflight/simulate")
+async def preflight_simulate_quote():
+    """x402 / BoltzPay GET quote & discovery endpoint for pre-flight simulation."""
+    return x402_response("Payment required. Pre-flight simulation requires 0.05 USDC or 0.00035 SOL.", service="preflight")
+
 
 @app.post("/api/v1/preflight/simulate")
 @app.post("/v2/preflight/simulate")
@@ -815,14 +1019,7 @@ async def preflight_simulate(
         payment_is_session = True
 
     if not payment_is_session:
-        payment_proof = x_payment or payment_signature or req.tx_signature
-        if payment_proof and len(payment_proof) > 100:
-            try:
-                decoded = base64.b64decode(payment_proof).decode("utf-8")
-                parsed_json = json.loads(decoded)
-                payment_proof = parsed_json.get("tx_signature") or parsed_json.get("signature") or payment_proof
-            except Exception:
-                pass
+        payment_proof = extract_payment_proof(x_payment or payment_signature or req.tx_signature)
 
         if not payment_proof:
             preview = await build_diagnostic_preview("simulate_tx", {"chain": req.chain, "tx": req.tx})
@@ -882,6 +1079,13 @@ async def preflight_simulate(
 
 # --- Live On-Chain Token Rug & Honeypot Auditor -------------------------------
 
+@app.get("/api/v1/token/audit")
+@app.get("/v2/token/audit")
+async def token_audit_quote():
+    """x402 / BoltzPay GET quote & discovery endpoint for live token auditing."""
+    return x402_response("Payment required. Live token rug & honeypot audit requires 0.05 USDC or 0.00035 SOL.", service="token")
+
+
 @app.post("/api/v1/token/audit")
 @app.post("/v2/token/audit")
 async def token_audit(
@@ -904,14 +1108,7 @@ async def token_audit(
         payment_is_session = True
 
     if not payment_is_session:
-        payment_proof = x_payment or payment_signature or req.tx_signature
-        if payment_proof and len(payment_proof) > 100:
-            try:
-                decoded = base64.b64decode(payment_proof).decode("utf-8")
-                parsed_json = json.loads(decoded)
-                payment_proof = parsed_json.get("tx_signature") or parsed_json.get("signature") or payment_proof
-            except Exception:
-                pass
+        payment_proof = extract_payment_proof(x_payment or payment_signature or req.tx_signature)
 
         if not payment_proof:
             preview = await build_diagnostic_preview("audit_token", {"chain": req.chain, "token_address": req.token_address})
@@ -970,6 +1167,13 @@ async def token_audit(
 
 # --- Anti-Bot Web Access & Scraper Oracle ------------------------------------
 
+@app.get("/api/v1/oracle/scrape")
+@app.get("/v2/oracle/scrape")
+async def oracle_scrape_quote():
+    """x402 / BoltzPay GET quote & discovery endpoint for anti-bot scraper oracle."""
+    return x402_response("Payment required. Anti-bot scraper oracle requires 0.02 USDC or 0.00015 SOL.", service="scrape")
+
+
 @app.post("/api/v1/oracle/scrape")
 @app.post("/v2/oracle/scrape")
 async def oracle_scrape(
@@ -992,14 +1196,7 @@ async def oracle_scrape(
         payment_is_session = True
 
     if not payment_is_session:
-        payment_proof = x_payment or payment_signature or req.tx_signature
-        if payment_proof and len(payment_proof) > 100:
-            try:
-                decoded = base64.b64decode(payment_proof).decode("utf-8")
-                parsed_json = json.loads(decoded)
-                payment_proof = parsed_json.get("tx_signature") or parsed_json.get("signature") or payment_proof
-            except Exception:
-                pass
+        payment_proof = extract_payment_proof(x_payment or payment_signature or req.tx_signature)
 
         if not payment_proof:
             return x402_response("Payment required. Anti-bot scraper oracle requires 0.02 USDC or 0.00015 SOL.", service="scrape")
@@ -1329,6 +1526,18 @@ async def mcp_post(request: Request):
             content={"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
             headers={"Access-Control-Allow-Origin": "*"}
         )
+    # Propagate HTTP-level x402 / session headers into JSON-RPC params._meta
+    if isinstance(body, dict) and isinstance(body.get("params"), dict):
+        hdr_session = request.headers.get("X-SCANPAY-SESSION") or request.headers.get("X-PAYMENT-SESSION")
+        hdr_payment = extract_payment_proof(request.headers.get("X-PAYMENT") or request.headers.get("PAYMENT-SIGNATURE"))
+        if hdr_session or hdr_payment:
+            meta = dict(body["params"].get("_meta") or {})
+            if hdr_session and "session_token" not in meta:
+                meta["session_token"] = hdr_session
+            if hdr_payment and "payment" not in meta:
+                meta["payment"] = hdr_payment
+            body["params"]["_meta"] = meta
+
     result = await handle_mcp_jsonrpc(
         request_data=body,
         merchant_wallet=MERCHANT_WALLET,

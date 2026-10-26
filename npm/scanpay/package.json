@@ -1,7 +1,7 @@
 {
   "name": "scanpay-cli",
   "version": "1.2.0",
-  "description": "Code security scanner, Tx Preflight & Anti-Bot Scraper Oracle with x402 v2 micropayments. Includes MCP server for AI agents.",
+  "description": "Code security scanner, Live Token Rug/Honeypot Shield, Tx Preflight & Anti-Bot Scraper Oracle with x402 v2 micropayments on Solana & Base.",
   "main": "index.js",
   "bin": {
     "scanpay": "./bin/cli.js",
@@ -14,15 +14,14 @@
     "security",
     "scanner",
     "code-scanner",
-    "vulnerability",
+    "token-auditor",
+    "honeypot-detector",
     "x402",
     "solana",
+    "base",
     "micropayments",
     "ai-agents",
-    "static-analysis",
-    "python",
-    "javascript",
-    "typescript"
+    "mcp"
   ],
   "author": "alextaghiashvili",
   "license": "MIT",
@@ -35,9 +34,6 @@
     "url": "https://github.com/Misterio070/scanpay/issues"
   },
   "engines": {
-    "node": ">=14"
-  },
-  "dependencies": {
-    "node-fetch": "^2.7.0"
+    "node": ">=16"
   }
 }

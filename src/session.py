@@ -60,18 +60,35 @@ def create_session_voucher(
     now = time.time()
     expires_at = now + (expiry_days * 86400)
 
-    conn = sqlite3.connect(db_path, timeout=10.0)
+    conn = sqlite3.connect(db_path, timeout=10.0, isolation_level=None)
     init_session_table(conn)
-    conn.execute(
-        """
-        INSERT INTO session_vouchers 
-        (voucher_id, session_token, payer, deposit_tx, total_credits, remaining_credits, created_at, expires_at, is_active)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
-        """,
-        (voucher_id, session_token, payer, deposit_tx, credits, credits, now, expires_at),
-    )
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute("BEGIN IMMEDIATE;")
+        existing = conn.execute(
+            "SELECT voucher_id FROM session_vouchers WHERE deposit_tx = ?",
+            (deposit_tx,),
+        ).fetchone()
+        if existing:
+            conn.execute("ROLLBACK;")
+            raise ValueError("Deposit transaction already used to mint a session voucher.")
+
+        conn.execute(
+            """
+            INSERT INTO session_vouchers 
+            (voucher_id, session_token, payer, deposit_tx, total_credits, remaining_credits, created_at, expires_at, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+            """,
+            (voucher_id, session_token, payer, deposit_tx, credits, credits, now, expires_at),
+        )
+        conn.execute("COMMIT;")
+    except Exception:
+        try:
+            conn.execute("ROLLBACK;")
+        except Exception:
+            pass
+        raise
+    finally:
+        conn.close()
 
     return {
         "voucher_id": voucher_id,
