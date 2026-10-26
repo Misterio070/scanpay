@@ -830,30 +830,12 @@ class ProductInfo(BaseModel):
 
 # --- App Lifespan ------------------------------------------------------------
 
-async def _render_keepalive_loop():
-    """Periodically ping canonical ingress URL on Render to prevent 15-min cold-start spin-down."""
-    while True:
-        await asyncio.sleep(540)  # 9 minutes
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                await client.get(f"{CANONICAL_URL}/api/v1/health")
-        except Exception:
-            pass
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     logger.info(f"ScanPay starting — payment_mode={PAYMENT_MODE}, "
                 f"js_engine={JS_AVAILABLE}, db={DB_PATH}")
-    keepalive_task = None
-    if os.getenv("RENDER"):
-        keepalive_task = asyncio.create_task(_render_keepalive_loop())
-    try:
-        yield
-    finally:
-        if keepalive_task:
-            keepalive_task.cancel()
+    yield
 
 
 app = FastAPI(
