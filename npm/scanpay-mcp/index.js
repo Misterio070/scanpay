@@ -87,9 +87,10 @@ function format402Message(serviceLabel, body) {
   }
 
   out += `Settlement Options:\n`;
-  out += `  1. Base USDC: Send ${reqs.accepts?.[2]?.amount_display || "0.05-0.10 USDC"} to ${reqs.accepts?.[2]?.recipient || "0xb295E606F38C363b476FC546c27226B5fBcAAEFA"} (Contract: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913)\n`;
-  out += `  2. Solana SOL: Send ${reqs.amount_display || "0.0007 SOL"} to ${reqs.recipient || "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4"}\n`;
-  out += `  3. Session Voucher (10 credits, 0ms latency): Deposit 0.85 Base USDC or 0.006 SOL via create_session_deposit\n\n`;
+  out += `  1. Base USDC: Send ${reqs.accepts?.[0]?.amount_display || "0.05-0.10 USDC"} to ${reqs.accepts?.[0]?.payTo || "0xb295E606F38C363b476FC546c27226B5fBcAAEFA"} (Contract: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913)\n`;
+  out += `  2. Solana SOL / USDC: Send ${reqs.amount_display || "0.0007 SOL"} (or ${reqs.accepts?.[1]?.amount_display || "0.10 USDC"}) to ${reqs.recipient || "JDKXvegmW5j4sAJPB6YCA9ffJbN422WLMmCWCcpy1vm4"}\n`;
+  out += `  3. Automatic x402 CLI: npx @boltzpay/cli fetch ${SCANPAY_URL}/api/v1/scan -X POST -d '{"source_code":"...","language":"python"}'\n`;
+  out += `  4. Session Voucher (10 credits, 0ms latency): Deposit 0.85 Base USDC or 0.006 SOL via create_session_deposit\n\n`;
   out += `To unlock the full report, pass payment_tx="<tx_hash>" or session_token="<sp_sess_...>" in your tool call.`;
   return out;
 }
