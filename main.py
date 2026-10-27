@@ -102,6 +102,7 @@ MERCHANT_WALLET = (os.getenv("SCANPAY_MERCHANT_WALLET") or "JDKXvegmW5j4sAJPB6YC
 MERCHANT_EVM_WALLET = (os.getenv("SCANPAY_MERCHANT_EVM_WALLET") or "0xb295E606F38C363b476FC546c27226B5fBcAAEFA").strip()
 BASE_RPC = os.getenv("SCANPAY_BASE_RPC", "https://mainnet.base.org")
 BASE_USDC_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+USDC_MINT_SOLANA = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 TRANSFER_EVENT_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
 PRICE_LAMPORTS = int(os.getenv("SCANPAY_PRICE_LAMPORTS") or "700000")
@@ -643,23 +644,59 @@ async def verify_solana_tx(tx_sig: str, min_lamports: int = PRICE_LAMPORTS, min_
                         "slot": tx.get("slot"),
                     }
 
-            # 2. SPL Token transfer (USDC: 6 decimals)
+            # 2. SPL Token transfer — must be real USDC into a merchant-owned account
             if itype in ("transfer", "transferChecked"):
                 amount_str = info.get("amount") or (info.get("tokenAmount", {}).get("amount"))
-                if amount_str:
-                    amt = int(amount_str)
-                    mint = info.get("mint")
-                    if mint and mint != "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v":
-                        continue
-                    if amt >= min_usdc:
-                        return {
-                            "valid": True,
-                            "payer": info.get("source", "") or info.get("authority", ""),
-                            "amount_lamports": amt,
-                            "asset": "USDC",
-                            "network": network,
-                            "slot": tx.get("slot"),
-                        }
+                if not amount_str:
+                    continue
+                amt = int(amount_str)
+                if amt < min_usdc:
+                    continue
+
+                dest_acct = info.get("destination") or ""
+                mint = info.get("mint")
+                owner = None
+
+                # Resolve the destination token account: proves both the asset and
+                # that the merchant actually owns it. A plain SPL `transfer` carries
+                # no mint in its parsed form, so this lookup is the only honest way
+                # to know what was sent — without it any minted token passes.
+                if dest_acct:
+                    try:
+                        acc = await client.post(SOLANA_RPC, json={
+                            "jsonrpc": "2.0",
+                            "id": 2,
+                            "method": "getAccountInfo",
+                            "params": [dest_acct, {"encoding": "jsonParsed"}],
+                        })
+                        parsed_info = (
+                            acc.json().get("result", {})
+                            .get("value", {})
+                            .get("data", {})
+                            .get("parsed", {})
+                            .get("info", {})
+                        )
+                        owner = parsed_info.get("owner")
+                        mint = parsed_info.get("mint") or mint
+                    except Exception:
+                        owner = None
+
+                if mint != USDC_MINT_SOLANA:
+                    continue
+                if owner is not None and owner != MERCHANT_WALLET:
+                    continue
+                if owner is None:
+                    # Could not prove the destination belongs to the merchant.
+                    continue
+
+                return {
+                    "valid": True,
+                    "payer": info.get("source", "") or info.get("authority", ""),
+                    "amount_lamports": amt,
+                    "asset": "USDC",
+                    "network": network,
+                    "slot": tx.get("slot"),
+                }
         raise ValueError(f"No valid transfer to {MERCHANT_WALLET} of >= {min_lamports} lamports or >= {min_usdc / 1_000_000:.2f} USDC")
 
 

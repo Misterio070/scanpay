@@ -136,6 +136,27 @@ RULES: dict[str, _Rule] = {
     "AGT-PY-029": _Rule("AGT-PY-029", "high", "obfuscation",
         "Non-constant dynamic reflection or builtins subscript lookup detected.",
         "Use explicit static function calls rather than dynamic getattr/globals lookup to avoid security evasion."),
+    "PY-SQL-INJECTION": _Rule("PY-SQL-INJECTION", "critical", "injection",
+        "SQL statement built by string interpolation and passed to execute().",
+        "Use parameterized queries: cursor.execute(\"SELECT ... WHERE id = ?\", (value,)). Never format SQL with f-strings, %, or .format()."),
+    "PY-WEAK-CRYPTO": _Rule("PY-WEAK-CRYPTO", "high", "cryptography",
+        "Weak or broken cryptographic primitive detected (MD5/SHA1/DES/RC4).",
+        "Use SHA-256 or stronger for digests, and AES-GCM or ChaCha20-Poly1305 for encryption. Use bcrypt/argon2 for passwords."),
+    "PY-WEAK-RANDOM": _Rule("PY-WEAK-RANDOM", "high", "cryptography",
+        "Non-cryptographic random generator used where a security value is expected.",
+        "Use secrets.token_hex()/secrets.token_urlsafe() or os.urandom() for tokens, keys, salts, nonces and passwords."),
+    "PY-JWT-NONE": _Rule("PY-JWT-NONE", "critical", "authentication",
+        "JWT signature verification disabled or 'none' algorithm allowed.",
+        "Always verify the signature: jwt.decode(token, key, algorithms=[\"RS256\"]) with an explicit algorithm allowlist."),
+    "PY-TLS-VERIFY-OFF": _Rule("PY-TLS-VERIFY-OFF", "high", "transport",
+        "TLS certificate verification disabled on an outbound request.",
+        "Remove verify=False. Fix the trust store instead of disabling verification."),
+    "PY-ARCHIVE-SLIP": _Rule("PY-ARCHIVE-SLIP", "high", "filesystem",
+        "Archive extracted without validating member paths (zip-slip / tar traversal).",
+        "Validate every member path resolves inside the target directory before extraction."),
+    "PY-XXE": _Rule("PY-XXE", "high", "injection",
+        "XML parsed with external entity resolution enabled (XXE).",
+        "Use defusedxml, or an lxml parser created with resolve_entities=False and no_network=True."),
 }
 
 
@@ -184,6 +205,7 @@ class _Visitor(ast.NodeVisitor):
         self._dynamic_modules: dict[str, str] = {}
         self._callable_aliases: dict[str, str] = {}
         self._sensitive_vars: set[str] = set()
+        self._interpolated: set[str] = set()       # names holding runtime-built strings
 
     # functions that are dangerous even when imported bare via `from x import y`
     _FROM_SINKS: ClassVar[set[str]] = {
@@ -309,6 +331,13 @@ class _Visitor(ast.NodeVisitor):
                 self._constant_strings[name] = value
             else:
                 self._constant_strings.pop(name, None)
+            # track names holding a runtime-interpolated string (SQLi / path taint)
+            if isinstance(node.value, (ast.JoinedStr, ast.BinOp)) or (
+                isinstance(node.value, ast.Call) and _func_name(node.value) == "str.format"
+            ):
+                self._interpolated.add(name)
+            elif value is not None:
+                self._interpolated.discard(name)
 
         if isinstance(node.value, ast.Call):
             called = _func_name(node.value)
@@ -451,6 +480,88 @@ class _Visitor(ast.NodeVisitor):
         if name in ("send_transaction", "send_raw_transaction", "broadcast_transaction"):
             if "simulate" not in self.source.lower():
                 self.add("AGT-PY-028", node, "high", evidence=f"Unsimulated transaction broadcast: {name}")
+
+        # --- PY-SQL-INJECTION: interpolated SQL reaching execute() -------------
+        if base in ("execute", "executemany", "executescript") and node.args:
+            q = node.args[0]
+            interpolated = (
+                isinstance(q, ast.JoinedStr)
+                or (isinstance(q, ast.BinOp) and isinstance(q.op, (ast.Mod, ast.Add)))
+                or (isinstance(q, ast.Call)
+                    and (_func_name(q) == "format" or _func_name(q).endswith(".format")))
+                or (isinstance(q, ast.Name) and q.id in self._interpolated)
+            )
+            if interpolated:
+                self.add("PY-SQL-INJECTION", node)
+
+        # --- PY-WEAK-CRYPTO ---------------------------------------------------
+        if name in ("hashlib.md5", "hashlib.sha1",
+                    "Crypto.Cipher.DES.new", "Crypto.Cipher.ARC4.new",
+                    "Cryptodome.Cipher.DES.new", "Cryptodome.Cipher.ARC4.new"):
+            self.add("PY-WEAK-CRYPTO", node)
+        if name == "hashlib.new" and node.args:
+            algo = self._resolve_string(node.args[0])
+            if algo and algo.lower() in ("md5", "sha1", "md4", "des", "rc4"):
+                self.add("PY-WEAK-CRYPTO", node)
+
+        # --- PY-WEAK-RANDOM: security-named value from a non-CSPRNG -----------
+        if name.startswith("random.") and base in (
+            "random", "randint", "randrange", "choice", "choices",
+            "sample", "getrandbits", "uniform", "shuffle",
+        ):
+            lines = self.source.splitlines()
+            ln = getattr(node, "lineno", 0)
+            line_text = (lines[ln - 1] if 0 < ln <= len(lines) else "").lower()
+            if any(k in line_text for k in (
+                "token", "key", "secret", "password", "passwd", "salt",
+                "nonce", "otp", "session", "api_", "csrf",
+            )):
+                self.add("PY-WEAK-RANDOM", node, "medium")
+
+        # --- PY-JWT-NONE ------------------------------------------------------
+        if base in ("decode", "verify") and name.startswith(("jwt.", "jose.", "authlib.")):
+            for kw in node.keywords:
+                if kw.arg in ("verify", "verify_signature") and isinstance(
+                    kw.value, ast.Constant
+                ) and kw.value.value is False:
+                    self.add("PY-JWT-NONE", node)
+                if kw.arg == "algorithms" and isinstance(kw.value, (ast.List, ast.Tuple)):
+                    for elt in kw.value.elts:
+                        if isinstance(elt, ast.Constant) and str(elt.value).lower() == "none":
+                            self.add("PY-JWT-NONE", node)
+                if kw.arg == "options" and isinstance(kw.value, ast.Dict):
+                    for k, v in zip(kw.value.keys, kw.value.values):
+                        if (isinstance(k, ast.Constant) and k.value == "verify_signature"
+                                and isinstance(v, ast.Constant) and v.value is False):
+                            self.add("PY-JWT-NONE", node)
+
+        # --- PY-TLS-VERIFY-OFF ------------------------------------------------
+        if name.startswith(("requests.", "httpx.", "aiohttp.")):
+            for kw in node.keywords:
+                if (kw.arg == "verify" and isinstance(kw.value, ast.Constant)
+                        and kw.value.value is False):
+                    self.add("PY-TLS-VERIFY-OFF", node)
+
+        # --- PY-ARCHIVE-SLIP --------------------------------------------------
+        if base in ("extractall", "unpack_archive"):
+            self.add("PY-ARCHIVE-SLIP", node, "medium")
+
+        # --- PY-XXE -----------------------------------------------------------
+        if "defusedxml" not in self.source.lower():
+            if name in (
+                "xml.etree.ElementTree.parse", "xml.etree.ElementTree.fromstring",
+                "ElementTree.parse", "ElementTree.fromstring", "ET.parse", "ET.fromstring",
+                "xml.dom.minidom.parse", "xml.dom.minidom.parseString",
+                "minidom.parse", "minidom.parseString",
+                "lxml.etree.parse", "lxml.etree.fromstring",
+                "etree.parse", "etree.fromstring", "lxml.etree.XML",
+            ):
+                self.add("PY-XXE", node, "medium")
+            if base == "XMLParser":
+                for kw in node.keywords:
+                    if (kw.arg == "resolve_entities" and isinstance(kw.value, ast.Constant)
+                            and kw.value.value is True):
+                        self.add("PY-XXE", node)
 
         self.generic_visit(node)
 
