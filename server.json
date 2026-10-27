@@ -1,40 +1,21 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.Misterio070/scanpay",
-  "description": "Deterministic AST code security scanner, Tx Preflight & Anti-Bot Scraper Oracle for AI agents with x402 micropayments.",
+  "title": "ScanPay — Code Security Oracle",
+  "description": "Deterministic code security scan + tx preflight, paid in USDC via x402.",
   "repository": {
     "url": "https://github.com/Misterio070/scanpay",
-    "source": "github",
-    "subfolder": "npm/scanpay-mcp"
+    "source": "github"
   },
   "version": "1.2.0",
   "remotes": [
     {
-      "type": "sse",
-      "url": "https://scanpay-ob3w.onrender.com/sse"
+      "type": "streamable-http",
+      "url": "https://scanpay-ob3w.onrender.com/mcp"
     },
     {
-      "type": "http",
-      "url": "https://scanpay-ob3w.onrender.com/mcp"
-    }
-  ],
-  "packages": [
-    {
-      "registryType": "npm",
-      "identifier": "scanpay-mcp-server",
-      "version": "0.3.1",
-      "transport": {
-        "type": "stdio"
-      },
-      "environmentVariables": [
-        {
-          "description": "ScanPay API URL (default: https://scanpay-ob3w.onrender.com)",
-          "isRequired": false,
-          "format": "string",
-          "isSecret": false,
-          "name": "SCANPAY_URL"
-        }
-      ]
+      "type": "sse",
+      "url": "https://scanpay-ob3w.onrender.com/sse"
     }
   ]
 }
