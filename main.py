@@ -334,6 +334,24 @@ def build_x402_requirements(service: str = "scan") -> dict:
             "content": {"markdown": "# Clean Extracted Content", "estimated_tokens": 120},
             "bot_protection": {"waf_detected": False},
         }
+    elif service == "session":
+        lamports = SESSION_BATCH_PRICE_LAMPORTS
+        sol_display = "0.006 SOL"
+        usdc_units = 850000
+        usdc_display = "0.85 USDC"
+        eth_wei = 255000000000000
+        eth_display = "0.000255 ETH"
+        resource_path = f"{CANONICAL_URL}/api/v1/session/deposit"
+        desc = "ScanPay: prepaid session of 10 operations across scan, preflight and scrape"
+        tags = ["session-voucher", "prepaid-batch", "a2a-guardrail", "solana-x402", "base-x402"]
+        body_fields = {
+            "deposit_tx": {"type": "string", "description": "Signature or transaction hash of the deposit payment", "required": True},
+        }
+        output_example = {
+            "session_id": "sess_abc123",
+            "credits_remaining": 10,
+            "expires_at": "2026-12-31T00:00:00Z",
+        }
     else:
         lamports = PRICE_LAMPORTS
         sol_display = f"{PRICE_SOL} SOL"
@@ -1158,6 +1176,13 @@ async def scan_code(
     )
 
 
+@app.get("/api/v1/session/deposit")
+@app.get("/v2/session/deposit")
+async def session_deposit_quote():
+    """x402 / BoltzPay GET quote & discovery endpoint for prepaid sessions."""
+    return x402_response("Payment required. A 10-operation session requires 0.85 USDC or 0.006 SOL.", service="session")
+
+
 @app.post("/api/v1/session/deposit")
 @app.post("/v2/session/deposit")
 async def session_deposit(req: SessionDepositRequest):
@@ -1784,6 +1809,24 @@ def custom_openapi():
     openapi_schema["info"]["x-bazaar-discoverable"] = True
 
     paths = openapi_schema.get("paths", {})
+
+    # x402 directories probe every documented path and expect a 402. Free routes
+    # (health, stats, docs, discovery files) answer 200 by design, so marking them
+    # with an empty security requirement tells the prober to skip them instead of
+    # recording a false "no valid x402 response" for the whole origin.
+    paid_paths = {
+        "/api/v1/scan", "/v2/scan",
+        "/api/v1/token/audit", "/v2/token/audit",
+        "/api/v1/preflight/simulate", "/v2/preflight/simulate",
+        "/api/v1/oracle/scrape", "/v2/oracle/scrape",
+        "/api/v1/session/deposit", "/v2/session/deposit",
+    }
+    for path, ops in paths.items():
+        if path in paid_paths:
+            continue
+        for op in ops.values():
+            if isinstance(op, dict):
+                op["security"] = []
     for path in ["/api/v1/scan", "/v2/scan"]:
         if path in paths and "post" in paths[path]:
             paths[path]["post"]["x-upgrade-meta"] = {

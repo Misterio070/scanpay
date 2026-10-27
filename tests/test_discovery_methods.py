@@ -54,3 +54,21 @@ def test_favicon_is_served_for_catalog_listings():
 def test_openapi_carries_a_contact_for_ownership_verification():
     contact = client.get("/openapi.json").json()["info"]["contact"]
     assert contact["email"], contact
+
+
+def test_session_deposit_quotes_before_payment():
+    """The prepaid-session route is paid too; a GET quote keeps it probeable."""
+    r = client.head("/api/v1/session/deposit")
+    assert r.status_code == 402, r.status_code
+    body = client.get("/api/v1/session/deposit").json()
+    assert body["resource"]["url"].endswith("/api/v1/session/deposit")
+    assert any(a["amount"] in ("850000", 850000) for a in body["accepts"])
+
+
+def test_free_routes_are_marked_so_probers_skip_them():
+    spec = client.get("/openapi.json").json()["paths"]
+    for path in ("/api/v1/health", "/api/v1/stats", "/llms.txt"):
+        for op in spec[path].values():
+            assert op.get("security") == [], f"{path} still looks payable to a prober"
+    paid = spec["/api/v1/scan"]["get"]
+    assert paid.get("security") != [], "paid route must not be marked free"
