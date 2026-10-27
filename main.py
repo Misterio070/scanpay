@@ -898,15 +898,37 @@ app = FastAPI(
     title="ScanPay",
     description="Paid deterministic code security scanner. x402 v2 payment discovery, remote MCP, and session vouchers.",
     version=ENGINE_VERSION,
+    contact={"name": "ScanPay", "url": "https://github.com/Misterio070/scanpay", "email": "misterio070@users.noreply.github.com"},
     lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "OPTIONS", "HEAD"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def discovery_method_support(request: Request, call_next):
+    """Answer HEAD and bare OPTIONS like GET so x402 crawlers can probe paid routes.
+
+    FastAPI only registers an explicit route per HTTP method, so a HEAD probe of a
+    GET route came back 405 and every x402 directory (x402scan, agent402, Bazaar)
+    recorded the endpoint as unreachable. HEAD is served by re-dispatching as GET
+    and dropping the body; the 402 challenge and its headers survive unchanged.
+    """
+    method = request.method
+    if method == "HEAD":
+        request.scope["method"] = "GET"
+        response = await call_next(request)
+        response.body = b""
+        return response
+    response = await call_next(request)
+    if method == "OPTIONS" and response.status_code == 405:
+        return JSONResponse(status_code=204, content=None, headers={"Allow": "GET, HEAD, POST, OPTIONS"})
+    return response
 
 
 # --- Core Routes -------------------------------------------------------------
@@ -1670,6 +1692,18 @@ SITEMAP_XML_CONTENT = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
+@app.get("/favicon.ico")
+@app.get("/favicon.svg")
+async def favicon_route():
+    """Serve the brand mark so x402 catalogs can show an icon for the listing."""
+    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "social-preview.svg")
+    if os.path.exists(icon_path):
+        with open(icon_path, "rb") as f:
+            return Response(content=f.read(), media_type="image/svg+xml",
+                            headers={"Cache-Control": "public, max-age=86400"})
+    return Response(status_code=204)
+
+
 @app.get("/llms.txt")
 async def llms_txt_route():
     llms_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "llms.txt")
@@ -1738,6 +1772,7 @@ def custom_openapi():
         title="ScanPay A2A Security Oracle",
         version=ENGINE_VERSION,
         description="Deterministic AST code security scanner with x402 Solana micropayments, remote MCP, and ERC-8183 Evaluator oracle.",
+        contact={"name": "ScanPay", "url": "https://github.com/Misterio070/scanpay", "email": "misterio070@users.noreply.github.com"},
         routes=app.routes,
     )
     openapi_schema["info"]["x-payment-protocol"] = "x402"
