@@ -44,7 +44,7 @@ from fastapi import FastAPI, HTTPException, Header, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 # --- Local Modules -----------------------------------------------------------
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -839,13 +839,32 @@ class SessionDepositRequest(BaseModel):
 
 class PreflightRequest(BaseModel):
     chain: str = Field(default="base")
-    tx: Dict[str, Any] = Field(...)
+    tx: Dict[str, Any] = Field(
+        ...,
+        validation_alias=AliasChoices("tx", "transaction", "raw_tx", "payload", "transaction_data"),
+    )
     tx_signature: Optional[str] = None
 
 
 class TokenAuditRequest(BaseModel):
     chain: str = Field(default="base", pattern="^(base|ethereum|solana)$")
-    token_address: str = Field(..., min_length=10, max_length=128)
+    # Agents guess the field name. Accept every common spelling instead of
+    # returning 422, which no agent retries.
+    token_address: str = Field(
+        ...,
+        min_length=10,
+        max_length=128,
+        validation_alias=AliasChoices(
+            "token_address",
+            "tokenAddress",
+            "address",
+            "contract",
+            "contract_address",
+            "mint",
+            "token",
+            "token_mint",
+        ),
+    )
     tx_signature: Optional[str] = None
 
 
