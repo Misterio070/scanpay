@@ -108,6 +108,12 @@ TRANSFER_EVENT_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a
 PRICE_LAMPORTS = int(os.getenv("SCANPAY_PRICE_LAMPORTS") or "700000")
 PRICE_SOL = PRICE_LAMPORTS / 1_000_000_000
 
+# Entry tier. Priced to make the first purchase trivial for an agent that is
+# comparing several paid tools: 0.02 USDC / 0.00015 SOL for a single pass.
+QUICK_SCAN_PRICE_LAMPORTS = int(os.getenv("SCANPAY_QUICK_PRICE_LAMPORTS") or "150000")
+QUICK_SCAN_PRICE_USDC_UNITS = 20000
+QUICK_SCAN_MAX_FINDINGS = 10
+
 PAYMENT_TIMEOUT_S = 600
 FREE_TRIAL_ENABLED = False
 X402_VERSION = 2
@@ -351,6 +357,27 @@ def build_x402_requirements(service: str = "scan") -> dict:
             "session_id": "sess_abc123",
             "credits_remaining": 10,
             "expires_at": "2026-12-31T00:00:00Z",
+        }
+    elif service == "quick_scan":
+        # Entry tier: the cheapest thing an agent can buy from us. It exists so
+        # a first purchase costs two cents instead of a dime.
+        lamports = QUICK_SCAN_PRICE_LAMPORTS
+        sol_display = f"{QUICK_SCAN_PRICE_LAMPORTS / 1_000_000_000} SOL"
+        usdc_units = 20000
+        usdc_display = "0.02 USDC"
+        eth_wei = 6000000000000
+        eth_display = "0.000006 ETH"
+        resource_path = f"{CANONICAL_URL}/api/v1/scan/quick"
+        desc = "ScanPay: fast single-pass security screen for one code sample"
+        tags = ["code-security", "quick-scan", "a2a-guardrail", "solana-x402", "base-x402"]
+        body_fields = {
+            "source_code": {"type": "string", "description": "Source code to screen", "required": True},
+            "language": {"type": "string", "description": "'python', 'javascript', 'typescript', or 'tsx'", "required": False},
+        }
+        output_example = {
+            "execution_gate": {"verdict": "WARN", "risk_score": 40, "allow_execution": True},
+            "findings_count": 1,
+            "findings": [],
         }
     else:
         lamports = PRICE_LAMPORTS
@@ -972,6 +999,16 @@ async def health():
 async def products():
     prods = [
         ProductInfo(
+            id="quick-scan",
+            name="Quick Security Screen",
+            price_sol=QUICK_SCAN_PRICE_LAMPORTS / 1_000_000_000,
+            price_usd_approx=0.02,
+            description="Entry tier: one deterministic pass over a single Python or JS/TS sample. "
+                        "Severity-ranked findings and a PASS/WARN/BLOCK verdict, no patches. "
+                        "Cheapest way for an agent to sample the engine.",
+            available=PAYMENT_MODE != "disabled",
+        ),
+        ProductInfo(
             id="python-scan",
             name="Python Security Scan",
             price_sol=PRICE_SOL,
@@ -1176,6 +1213,130 @@ async def scan_code(
             "PAYMENT-RESPONSE": receipt_header,
             "Access-Control-Allow-Origin": "*",
         }
+    )
+
+
+@app.get("/api/v1/scan/quick")
+@app.get("/v2/scan/quick")
+async def scan_quick_quote():
+    """Cheap entry tier quote, so discovery crawlers see the price ladder."""
+    return x402_response(
+        f"Payment required. Quick screen costs 0.02 Base USDC to {MERCHANT_EVM_WALLET} or "
+        f"{QUICK_SCAN_PRICE_LAMPORTS / 1_000_000_000} SOL to {MERCHANT_WALLET}, then POST "
+        f"/api/v1/scan/quick with X-PAYMENT.",
+        service="quick_scan",
+    )
+
+
+@app.post("/api/v1/scan/quick")
+@app.post("/v2/scan/quick")
+async def scan_quick(
+    req: ScanRequest,
+    x_payment: Optional[str] = Header(None, alias="X-PAYMENT"),
+    payment_signature: Optional[str] = Header(None, alias="PAYMENT-SIGNATURE"),
+):
+    """One paid pass over a single sample: findings + verdict, no patches.
+
+    The full scan returns remediation diffs and an A2A receipt; this tier
+    exists so an agent can buy a two-cent answer before committing to it.
+    """
+    proof = extract_payment_proof(x_payment or payment_signature or req.tx_signature)
+    if not proof:
+        return x402_response(
+            "Payment required. Quick screen costs 0.02 Base USDC or 0.00015 SOL.",
+            service="quick_scan",
+        )
+    if PAYMENT_MODE == "disabled":
+        return x402_response("Payment verification disabled.", service="quick_scan")
+
+    if not check_payment(proof):
+        try:
+            facilitator_res = await settle_x402_facilitator_payload(proof, service="quick_scan")
+            if facilitator_res:
+                proof = facilitator_res["tx_signature"]
+                result = facilitator_res
+            elif proof.startswith("0x") and len(proof) == 66:
+                result = await verify_evm_tx(proof, min_usdc=QUICK_SCAN_PRICE_USDC_UNITS)
+            else:
+                result = await verify_solana_tx(
+                    proof,
+                    min_lamports=QUICK_SCAN_PRICE_LAMPORTS,
+                    min_usdc=QUICK_SCAN_PRICE_USDC_UNITS,
+                )
+            store_payment(proof, result.get("payer", ""), result.get("amount_lamports", 0),
+                          result.get("network", ""))
+        except ValueError as exc:
+            raise HTTPException(status_code=402, detail=f"Payment verification failed: {exc}")
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"RPC error: {exc}")
+
+    if not check_payment(proof):
+        raise HTTPException(status_code=402, detail="Payment proof already used.")
+    if not mark_payment_used(proof):
+        raise HTTPException(status_code=402, detail="Payment proof already used.")
+
+    source = (req.source_code if req.source_code is not None else req.code) or ""
+    if req.language == "python":
+        r = scan_python(source)
+        rules_cnt = len(PY_RULES)
+    elif req.language in ("javascript", "typescript", "tsx") and JS_AVAILABLE:
+        r = scan_javascript(source, language=req.language)
+        rules_cnt = len(JS_RULES)
+    elif req.language in ("javascript", "typescript", "tsx"):
+        raise HTTPException(status_code=503, detail="JS engine not available")
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported language: {req.language}")
+
+    findings = [f.model_dump() for f in r.findings]
+    sev_order = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+    max_sev = max((f.get("severity", "low") for f in findings),
+                  key=lambda s: sev_order.get(s, 0), default="none")
+    a2a = build_a2a_response(
+        source=source,
+        language=req.language,
+        findings=r.findings,
+        execution_time_ms=r.scan_duration_ms,
+        rules_evaluated=rules_cnt,
+        merchant_wallet=MERCHANT_WALLET,
+        payment_receipt=proof,
+    )
+    gate = a2a.get("execution_gate", {})
+    record_scan(proof, req.language, sha256_hex(source), len(findings), max_sev)
+
+    payload = {
+        "tier": "quick",
+        "language": req.language,
+        "findings_count": len(findings),
+        "max_severity": max_sev,
+        "findings": findings[:QUICK_SCAN_MAX_FINDINGS],
+        "truncated": max(0, len(findings) - QUICK_SCAN_MAX_FINDINGS),
+        "execution_gate": gate,
+        "scan_duration_ms": r.scan_duration_ms,
+        "engine_version": ENGINE_VERSION,
+        "rules_evaluated": rules_cnt,
+        "upgrade": {
+            "product": "full_scan",
+            "price": "0.10 USDC or 0.0007 SOL",
+            "endpoint": f"{CANONICAL_URL}/api/v1/scan",
+            "adds": ["deterministic patches", "unified diffs", "A2A receipt", "session vouchers"],
+        },
+    }
+    receipt = base64.b64encode(json.dumps({
+        "success": True,
+        "transaction": proof,
+        "network": "eip155:8453" if proof.startswith("0x") else "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        "receipt": proof,
+        "status": "settled",
+        "verdict": gate.get("verdict", "WARN"),
+    }).encode("utf-8")).decode("utf-8")
+    return JSONResponse(
+        content=payload,
+        headers={
+            "X-SCANPAY-VERDICT": gate.get("verdict", "WARN"),
+            "X-SCANPAY-TIER": "quick",
+            "PAYMENT-RESPONSE": receipt,
+            "Access-Control-Allow-Origin": "*",
+        },
     )
 
 

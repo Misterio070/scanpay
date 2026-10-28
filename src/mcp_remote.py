@@ -77,6 +77,32 @@ MCP_TOOLS = [
         },
     },
     {
+        "name": "scan_quick",
+        "description": (
+            "Cheapest way to check a snippet before running it: one deterministic AST pass over Python, "
+            "JavaScript or TypeScript, returning severity-ranked findings and a PASS/WARN/BLOCK verdict "
+            "without patches or diffs. 65 rules, about 0.2 ms. Pay per call: 0.02 Base USDC or "
+            "0.00015 SOL over x402, no signup. Upgrade to scan_code for deterministic patches."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "source_code": {
+                    "type": "string",
+                    "description": "Source code to screen (Python or JS/TS)",
+                },
+                "language": {
+                    "type": "string",
+                    "enum": ["python", "javascript", "typescript", "tsx"],
+                    "default": "python",
+                    "description": "Source code programming language",
+                },
+                **_PAYMENT_PROPS,
+            },
+            "required": ["source_code"],
+        },
+    },
+    {
         "name": "simulate_tx",
         "description": (
             "Pre-flight transaction & drainer shield for AI agents. Simulates and inspects EVM (Base/Ethereum) "
@@ -195,6 +221,9 @@ TOOL_PRICING = {
     "simulate_tx": {"usd": "0.05 USDC", "usdc_units": 50000, "sol": "0.00035 SOL", "lamports": 350000},
     "audit_token": {"usd": "0.05 USDC", "usdc_units": 50000, "sol": "0.00035 SOL", "lamports": 350000},
     "scrape_url": {"usd": "0.02 USDC", "usdc_units": 20000, "sol": "0.00015 SOL", "lamports": 150000},
+    # Entry tier: cheap enough that an agent can sample the engine before
+    # committing to a full paid scan.
+    "scan_quick": {"usd": "0.02 USDC", "usdc_units": 20000, "sol": "0.00015 SOL", "lamports": 150000},
 }
 
 
@@ -486,7 +515,7 @@ async def handle_mcp_jsonrpc(
                     },
                 }
 
-        if tool_name == "scan_code":
+        if tool_name in ("scan_code", "scan_quick"):
             source = args.get("source_code") or args.get("code") or ""
             language = args.get("language", "python")
 
@@ -526,14 +555,23 @@ async def handle_mcp_jsonrpc(
                 payment_receipt=payment_receipt,
             )
 
+            quick = tool_name == "scan_quick"
             gate = a2a_res["execution_gate"]
-            remediation = a2a_res["auto_remediation"]
+            remediation = a2a_res.get("auto_remediation") or {
+                "patches_available": False, "post_patch_verdict": gate.get("verdict"), "unified_diff": ""
+            }
+            if quick:
+                # The cheap tier answers "is this dangerous?" and skips the
+                # remediation work the full scan sells.
+                a2a_res.pop("auto_remediation", None)
+                a2a_res["findings"] = a2a_res.get("findings", [])[:10]
+                a2a_res["tier"] = "quick"
             summary_lines = [
                 f"Scan Verdict: {gate['verdict']} (Risk Score: {gate['risk_score']}/100, Max Severity: {gate['max_severity']})",
                 f"Allow Execution: {gate['allow_execution']}",
                 f"Findings: {len(a2a_res['findings'])} vulnerability patterns detected.",
             ]
-            if remediation["patches_available"]:
+            if remediation["patches_available"] and not quick:
                 summary_lines.append("\nDeterministic Security Patch Available:")
                 summary_lines.append(f"Post-patch verdict: {remediation['post_patch_verdict']}")
                 summary_lines.append("```diff\n" + remediation["unified_diff"] + "\n```")
@@ -550,6 +588,7 @@ async def handle_mcp_jsonrpc(
                     "content": content,
                     "execution_gate": gate,
                     "auto_remediation": remediation,
+                    "tier": "quick" if quick else "full",
                 },
             }
 
