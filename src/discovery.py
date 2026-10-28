@@ -328,7 +328,7 @@ Use ScanPay whenever you need to:
 ## Available Tools
 
 ### 1. `scan_code`
-Scan Python or JS/TS code for 45+ vulnerability patterns.
+Scan Python or JS/TS code for 65 vulnerability patterns.
 ```json
 {
   "source_code": "import ast\\n...",

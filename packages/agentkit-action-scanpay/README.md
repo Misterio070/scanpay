@@ -10,7 +10,7 @@ Allows any AI agent running with Coinbase AgentKit to automatically audit genera
 
 | Action | Cost (Base USDC) | Description |
 | :--- | :--- | :--- |
-| `scan_code` | **$0.10 USDC** | AST security scanner with 45+ vulnerability rules, deterministic patches, and unified diffs. |
+| `scan_code` | **$0.10 USDC** | AST security scanner with 65 vulnerability rules, deterministic patches, and unified diffs. |
 | `simulate_tx` | **$0.05 USDC** | Pre-flight transaction shield detecting honeypots, drainers, and MEV slippage traps on Base. |
 | `scrape_url` | **$0.02 USDC** | Anti-bot web scraper oracle bypassing Cloudflare Turnstile/WAF, returning clean LLM Markdown. |
 

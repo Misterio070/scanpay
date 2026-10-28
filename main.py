@@ -1689,7 +1689,7 @@ ScanPay is an autonomous security guardrail and oracle suite for AI agents with 
 1. Code Security Scanner & Auto-Remediator (`scan_code`)
    - Endpoints: `POST /api/v1/scan`, `POST /v2/scan`
    - Pricing: 0.10 USDC or 0.0007 SOL
-   - 45+ AST vulnerability patterns, deterministic patches, unified diffs, execution verdicts (PASS, WARN, BLOCK).
+   - 65 AST vulnerability patterns, deterministic patches, unified diffs, execution verdicts (PASS, WARN, BLOCK).
 
 2. Pre-Flight Transaction & Drainer Shield (`simulate_tx`)
    - Endpoints: `POST /api/v1/preflight/simulate`, `POST /v2/preflight/simulate`

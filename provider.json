@@ -1,6 +1,6 @@
 {
   "name": "scanpay",
-  "description": "Code security scanner with x402 v2 micropayments. Scan Python/JS/TS for 45+ vulnerability patterns using deterministic AST analysis. No AI, no code execution — just fast, reliable pattern matching.",
+  "description": "Code security scanner with x402 v2 micropayments. Scan Python/JS/TS for 65 vulnerability patterns using deterministic AST analysis. No AI, no code execution — just fast, reliable pattern matching.",
   "version": "0.3.0",
   "url": "https://scanpay-ob3w.onrender.com",
   "payment": {

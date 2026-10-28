@@ -3,7 +3,7 @@
 Deterministic code security guardrail tool for **Solana Agent Kit v2** with x402 micropayments.
 
 ## Features
-- **Deterministic AST Audits:** Scans code for 45+ vulnerability patterns (injection, wallet key theft, SSRF, prompt-injected tool chaining).
+- **Deterministic AST Audits:** Scans code for 65 vulnerability patterns (injection, wallet key theft, SSRF, prompt-injected tool chaining).
 - **Autonomous Micropayments:** Automatically handles x402 HTTP 402 challenge, signs 0.0007 SOL transfer, and verifies results.
 - **Auto-Remediation:** Generates unified diffs and replacement code ready for autonomous application.
 - **Session Vouchers:** Supports `X-SCANPAY-SESSION` for 0ms latency high-frequency coding loops.

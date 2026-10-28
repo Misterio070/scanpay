@@ -46,10 +46,12 @@ MCP_TOOLS = [
     {
         "name": "scan_code",
         "description": (
-            "Deterministic code security scanner for AI agents. Analyzes Python, JavaScript, and TypeScript "
-            "code for 45+ vulnerability patterns (injection, hardcoded secrets, wallet key exfiltration, SSRF, "
-            "infinite x402 loops, unsimulated Solana transactions). Returns deterministic AST patches, "
-            "unified diffs, and execution verdicts (PASS, WARN, BLOCK). Price: $0.10 Base USDC or 0.0007 SOL."
+            "Use before shipping or executing agent-generated code. Deterministic AST scan for Python, "
+            "JavaScript and TypeScript with 65 rules (36 Python, 29 JS/TS) covering injection, hardcoded "
+            "secrets, wallet key exfiltration, SSRF, infinite x402 payment loops and unsimulated Solana "
+            "transactions. Returns findings with severity, deterministic patches, unified diffs and an "
+            "execution verdict (PASS, WARN, BLOCK). Pay per call: 0.10 Base USDC or 0.0007 SOL over x402, "
+            "no signup or API key."
         ),
         "inputSchema": {
             "type": "object",
@@ -297,11 +299,17 @@ async def handle_mcp_jsonrpc(
         }
 
     if method == "initialize":
+        # Echo the client's version when it is one we speak; clients that ask
+        # for a newer revision get the newest supported one instead of a
+        # downgrade that makes them drop features.
+        requested = (params or {}).get("protocolVersion")
+        supported = ("2025-06-18", "2025-03-26", "2024-11-05")
+        negotiated = requested if requested in supported else supported[0]
         return {
             "jsonrpc": "2.0",
             "id": req_id,
             "result": {
-                "protocolVersion": "2024-11-05",
+                "protocolVersion": negotiated,
                 "capabilities": {
                     "tools": {
                         "listChanged": False,

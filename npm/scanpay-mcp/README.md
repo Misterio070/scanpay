@@ -29,7 +29,7 @@ Add to `claude_desktop_config.json`:
 
 1. AI agent generates code
 2. Agent calls `scan_code` tool via MCP
-3. ScanPay scans for 45+ vulnerability patterns (Python + JS/TS)
+3. ScanPay scans for 65 vulnerability patterns (Python + JS/TS)
 4. Agent receives results before executing code
 5. Payment via x402 v2 micropayments (0.0007 SOL ~$0.10/scan)
 
