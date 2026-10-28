@@ -11,6 +11,13 @@ ScanPay is an autonomous security guardrail and oracle suite for AI agents with 
 
 ## Core Capabilities & Services:
 
+0. Quick Screen (`scan_quick`) — START HERE
+   - Endpoints: `GET /api/v1/scan/quick` (quote), `POST /api/v1/scan/quick` (paid call), MCP tool `scan_quick`
+   - Pricing: 0.02 USDC or 0.00015 SOL
+   - One deterministic pass, 65 rules, severity-ranked findings, PASS/WARN/BLOCK verdict, no patches.
+   - Cheapest way to sample the engine before buying the full scan (0.10 USDC) which adds patches and diffs.
+   - Real output on a sample file: https://github.com/Misterio070/scanpay/blob/main/docs/example-output.json
+
 1. Code Security Scanner & Auto-Remediator (`scan_code`)
    - Endpoints: `POST /api/v1/scan`, `POST /v2/scan`
    - Pricing: 0.10 USDC or 0.0007 SOL
@@ -35,5 +42,44 @@ ScanPay is an autonomous security guardrail and oracle suite for AI agents with 
    - Endpoint: `POST /api/v1/session/deposit`
    - Pricing: 0.85 USDC or 0.006 SOL (10 credits valid across all tools with 0ms RPC bypass).
    - Authenticated via `X-SCANPAY-SESSION` header.
+
+## Install (copy-paste, no account, no API key)
+
+Claude Desktop / Claude Code (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "scanpay": {
+      "type": "http",
+      "url": "https://scanpay-ob3w.onrender.com/mcp"
+    }
+  }
+}
+```
+
+Cursor (`.cursor/mcp.json`) and Cline use the same block under `mcpServers`.
+
+Any other client, SSE transport:
+
+```json
+{
+  "mcpServers": {
+    "scanpay": {
+      "url": "https://scanpay-ob3w.onrender.com/sse"
+    }
+  }
+}
+```
+
+Raw HTTP without MCP — the 402 response is the price list:
+
+```bash
+curl -s https://scanpay-ob3w.onrender.com/api/v1/scan/quick
+curl -s -X POST https://scanpay-ob3w.onrender.com/api/v1/scan/quick \
+  -H 'Content-Type: application/json' \
+  -H "X-PAYMENT: <base64 x402 payload or tx signature>" \
+  -d '{"source_code": "import pickle; pickle.loads(blob)", "language": "python"}'
+```
 
 - GitHub: https://github.com/Misterio070/scanpay

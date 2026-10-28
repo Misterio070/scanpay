@@ -1,0 +1,82 @@
+{
+  "tier": "quick",
+  "language": "python",
+  "findings_count": 6,
+  "max_severity": "critical",
+  "findings": [
+    {
+      "rule_id": "PY-SHELL-EXEC",
+      "severity": "critical",
+      "category": "shell_execution",
+      "line_start": 5,
+      "line_end": 5,
+      "column_start": 11,
+      "message": "Shell execution via shell=True or os.popen detected.",
+      "evidence": "subprocess.check_output(\"grep \" + user_input, shell=True)",
+      "confidence": "high",
+      "remediation": "Pass an argument list with shell=False and never interpolate untrusted input."
+    },
+    {
+      "rule_id": "PY-SUBPROCESS",
+      "severity": "medium",
+      "category": "process_spawn",
+      "line_start": 5,
+      "line_end": 5,
+      "column_start": 11,
+      "message": "subprocess invocation detected.",
+      "evidence": "subprocess.check_output(\"grep \" + user_input, shell=True)",
+      "confidence": "medium",
+      "remediation": "Ensure arguments are an explicit list, shell=False, and inputs are validated."
+    },
+    {
+      "rule_id": "PY-UNSAFE-DESERIALIZE",
+      "severity": "critical",
+      "category": "deserialization",
+      "line_start": 8,
+      "line_end": 8,
+      "column_start": 11,
+      "message": "Unsafe deserialization (pickle/marshal/shelve) detected.",
+      "evidence": "pickle.loads(blob)",
+      "confidence": "high",
+      "remediation": "Use a safe format (JSON) or validate/authenticate serialized data before loading."
+    },
+    {
+      "rule_id": "PY-HARDCODED-SECRET",
+      "severity": "high",
+      "category": "secret",
+      "line_start": 10,
+      "line_end": 10,
+      "column_start": 0,
+      "message": "Likely hardcoded credential/secret detected.",
+      "evidence": "<redacted secret-like literal>",
+      "confidence": "medium",
+      "remediation": "Move secrets to environment variables or a secret manager."
+    },
+    {
+      "rule_id": "PY-NETWORK",
+      "severity": "medium",
+      "category": "network",
+      "line_start": 14,
+      "line_end": 14,
+      "column_start": 11,
+      "message": "Outbound network request detected.",
+      "evidence": "requests.get(url, verify=False)",
+      "confidence": "medium",
+      "remediation": "Validate destinations against an allowlist; avoid exfiltration channels."
+    },
+    {
+      "rule_id": "PY-TLS-VERIFY-OFF",
+      "severity": "high",
+      "category": "transport",
+      "line_start": 14,
+      "line_end": 14,
+      "column_start": 11,
+      "message": "TLS certificate verification disabled on an outbound request.",
+      "evidence": "requests.get(url, verify=False)",
+      "confidence": "high",
+      "remediation": "Remove verify=False. Fix the trust store instead of disabling verification."
+    }
+  ],
+  "scan_duration_ms": 1,
+  "note": "Real output of the local engine on docs/example_input.py. No payment was involved."
+}
