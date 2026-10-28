@@ -573,6 +573,9 @@ async def settle_x402_facilitator_payload(raw_proof: str, service: str = "scan")
         "payTo": matched_req["payTo"],
         "maxTimeoutSeconds": matched_req["maxTimeoutSeconds"],
         "extra": matched_req.get("extra", {}),
+        # The facilitator records the resource it settled for; without this the
+        # payment succeeds but the endpoint never appears in Bazaar discovery.
+        "resource": matched_req.get("resource"),
     }
 
     last_err = "Unknown facilitator settlement error"
@@ -1252,6 +1255,45 @@ async def session_status(
     }
 
 
+_REVENUE_CACHE: dict = {"at": 0.0, "usdc": None}
+
+
+async def onchain_revenue() -> Optional[float]:
+    """Merchant USDC balance on Base, cached for 60s.
+
+    This is the only durable record of real sales: the hosting tier wipes
+    the SQLite file on restart, so counters reset while money does not.
+    Returns None when the RPC is unreachable rather than inventing a zero.
+    """
+    now = time.time()
+    if now - _REVENUE_CACHE["at"] < 60 and _REVENUE_CACHE["usdc"] is not None:
+        return _REVENUE_CACHE["usdc"]
+    data = "0x70a08231" + MERCHANT_EVM_WALLET.lower().replace("0x", "").rjust(64, "0")
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            resp = await client.post(
+                BASE_RPC,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "eth_call",
+                    "params": [
+                        {"to": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "data": data},
+                        "latest",
+                    ],
+                },
+            )
+            result = resp.json().get("result")
+        if not result or result == "0x":
+            return _REVENUE_CACHE["usdc"]
+        usdc = round(int(result, 16) / 1_000_000, 6)
+        _REVENUE_CACHE.update({"at": now, "usdc": usdc})
+        return usdc
+    except Exception as exc:  # network, rate limit, malformed response
+        logger.debug("onchain_revenue unavailable: %s", exc)
+        return _REVENUE_CACHE["usdc"]
+
+
 @app.get("/api/v1/stats")
 async def service_stats():
     conn = sqlite3.connect(DB_PATH)
@@ -1263,6 +1305,7 @@ async def service_stats():
         total_scans, total_payments, active_vouchers = 0, 0, 0
     finally:
         conn.close()
+    revenue = await onchain_revenue()
     return {
         "status": "operational",
         "engine_version": ENGINE_VERSION,
@@ -1274,6 +1317,10 @@ async def service_stats():
             "total_scans_processed": total_scans,
             "settled_x402_payments": total_payments,
             "active_session_vouchers": active_vouchers,
+            # Local counters live in SQLite, which is ephemeral on the free
+            # hosting tier: a restart resets them to zero. Revenue is read
+            # from the merchant wallet so the public number stays truthful.
+            "lifetime_revenue_usdc": revenue,
         },
     }
 
